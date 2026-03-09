@@ -10,6 +10,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
+import { useState, useEffect } from 'react';
 
 interface ElementConfiguratorProps {
   elements: EditableElement[];
@@ -17,6 +18,26 @@ interface ElementConfiguratorProps {
 }
 
 export function ElementConfigurator({ elements, onUpdate }: ElementConfiguratorProps) {
+  const [agents, setAgents] = useState<{id: string, name: string}[]>([]);
+  
+  // 获取 Agent 列表
+  useEffect(() => {
+    const loadAgents = async () => {
+      try {
+        const { agentStorage } = await import('@/lib/agent-storage');
+        const allAgents = agentStorage.getAll();
+        setAgents(allAgents.map((a: any) => ({ id: a.id, name: a.name })));
+      } catch (e) {
+        console.error('加载 Agent 失败:', e);
+      }
+    };
+    loadAgents();
+  }, []);
+  
+  // 判断是否是主体图片字段
+  const isMainImageField = (field: string | undefined) => {
+    return field === 'main_image' || field === 'main_image_2' || field === 'main_image_3';
+  };
   const handleToggle = (id: string, checked: boolean) => {
     const newElements = elements.map(el => {
       if (el.id === id) {
@@ -61,6 +82,17 @@ export function ElementConfigurator({ elements, onUpdate }: ElementConfiguratorP
     const newElements = elements.map(el => {
       if (el.id === id) {
         return { ...JSON.parse(JSON.stringify(el)), groupId };
+      }
+      return el;
+    });
+    onUpdate(newElements);
+  };
+
+  // 处理主体图片来源变更
+  const handleSubjectSourceChange = (id: string, source: string) => {
+    const newElements = elements.map(el => {
+      if (el.id === id) {
+        return { ...JSON.parse(JSON.stringify(el)), subjectSource: source };
       }
       return el;
     });
@@ -238,6 +270,54 @@ export function ElementConfigurator({ elements, onUpdate }: ElementConfiguratorP
                         className="h-8 w-[140px]"
                       />
                     )}
+                    
+                    {/* 主体图片来源选择 - 仅主体图片字段显示 */}
+                    {isMainImageField(el.cozeField) && (
+                      <Select 
+                        value={el.subjectSource || 'api'}
+                        onValueChange={(value) => handleSubjectSourceChange(el.id, value)}
+                      >
+                        <SelectTrigger className="h-8 w-[140px]">
+                          <SelectValue placeholder="生成来源" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="api">API 生成</SelectItem>
+                          <SelectItem value="agent">Agent 生成</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    )}
+                    
+                    {/* Agent 选择 - 仅当选择 Agent 时显示 */}
+                    {isMainImageField(el.cozeField) && el.subjectSource === 'agent' && (
+                      <Select 
+                        value={el.agentId || ''}
+                        onValueChange={(value) => {
+                          const newElements = elements.map(e => {
+                            if (e.id === el.id) {
+                              return { ...JSON.parse(JSON.stringify(e)), agentId: value };
+                            }
+                            return e;
+                          });
+                          onUpdate(newElements);
+                        }}
+                      >
+                        <SelectTrigger className="h-8 w-[140px]">
+                          <SelectValue placeholder="选择 Agent" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {agents.length === 0 ? (
+                            <SelectItem value="no-agents" disabled>暂无 Agent</SelectItem>
+                          ) : (
+                            agents.map(agent => (
+                              <SelectItem key={agent.id} value={agent.id}>
+                                {agent.name}
+                              </SelectItem>
+                            ))
+                          )}
+                        </SelectContent>
+                      </Select>
+                    )}
+                    
                     {/* 分组绑定输入框 */}
                     <Input 
                       value={el.groupId || ''}

@@ -317,6 +317,11 @@ export function ElementEditor({ elements, onUpdate }: ElementEditorProps) {
     setGeneratingId(id);
     try {
       let newImageSrc = '';
+      
+      // 获取当前元素
+      const element = elements.find(el => el.id === id);
+      const useAgent = element?.subjectSource === 'agent';
+      const agentId = element?.agentId;
 
       if (subjectMode[id] === 'upload') {
         if (!uploadedSubject[id]) {
@@ -334,33 +339,65 @@ export function ElementEditor({ elements, onUpdate }: ElementEditorProps) {
           return;
         }
         
-        toast.info('AI 正在生成图片，请稍候...');
+        toast.info(useAgent ? 'Agent 正在生成图片，请稍候...' : 'AI 正在生成图片，请稍候...');
         
-        const response = await fetch('/api/coze-canvas/chat', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ prompt: subjectPrompt[id] })
-        });
-        
-        const result = await response.json();
-        
-        if (result.code !== 0) {
-          throw new Error(result.msg || 'AI 生成失败');
+        if (useAgent && agentId) {
+          // 使用 Agent 生成
+          const response = await fetch('/api/coze/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+              botId: agentId,
+              prompt: subjectPrompt[id] 
+            })
+          });
+          
+          const result = await response.json();
+          
+          if (result.code !== 0) {
+            throw new Error(result.msg || 'Agent 生成失败');
+          }
+          
+          const { chatId, conversationId } = result.data;
+          
+          if (!chatId || !conversationId) {
+            throw new Error('Agent 生成失败：未获取到会话信息');
+          }
+          
+          console.log(`🤖 [handleSubjectApply] Agent生成会话已创建，chatId=${chatId}, conversationId=${conversationId}`);
+          
+          toast.info('Agent 图片生成中，请耐心等待...');
+          
+          // 轮询获取结果 - 使用 coze 接口
+          newImageSrc = await pollAIGeneration(chatId, conversationId);
+        } else {
+          // 使用 API 生成（默认）
+          const response = await fetch('/api/coze-canvas/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ prompt: subjectPrompt[id] })
+          });
+          
+          const result = await response.json();
+          
+          if (result.code !== 0) {
+            throw new Error(result.msg || 'AI 生成失败');
+          }
+          
+          const { chatId, conversationId } = result.data;
+          
+          if (!chatId || !conversationId) {
+            throw new Error('AI 生成失败：未获取到会话信息');
+          }
+          
+          console.log(`🤖 [handleSubjectApply] AI生成会话已创建，chatId=${chatId}, conversationId=${conversationId}`);
+          
+          toast.info('AI图片生成中，请耐心等待...');
+          newImageSrc = await pollAIGeneration(chatId, conversationId);
         }
-        
-        const { chatId, conversationId } = result.data;
-        
-        if (!chatId || !conversationId) {
-          throw new Error('AI 生成失败：未获取到会话信息');
-        }
-        
-        console.log(`🤖 [handleSubjectApply] AI生成会话已创建，chatId=${chatId}, conversationId=${conversationId}`);
-        
-        toast.info('AI图片生成中，请耐心等待...');
-        newImageSrc = await pollAIGeneration(chatId, conversationId);
         
         console.log(`🎯 [handleSubjectApply] AI生成成功，图片URL=${newImageSrc.slice(0, 50)}...`);
-        toast.success('AI 主体生成成功！');
+        toast.success(useAgent ? 'Agent 主体生成成功！' : 'AI 主体生成成功！');
       }
 
       // 应用生成的图片到元素

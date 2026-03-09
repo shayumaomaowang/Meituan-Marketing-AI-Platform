@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
-    const { prompt, fileIds, conversationId } = body
+    const { prompt, fileIds, conversationId, botId: customBotId } = body
 
     if (!prompt) {
       return NextResponse.json(
@@ -13,7 +13,8 @@ export async function POST(request: NextRequest) {
     }
 
     const apiToken = process.env.COZE_API_TOKEN
-    const botId = process.env.COZE_BOT_ID
+    // 优先使用请求体中的 botId，其次使用环境变量
+    const botId = customBotId || process.env.COZE_BOT_ID
 
     if (!apiToken || !botId) {
       return NextResponse.json(
@@ -95,4 +96,3 @@ export async function POST(request: NextRequest) {
     )
   }
 }
-
