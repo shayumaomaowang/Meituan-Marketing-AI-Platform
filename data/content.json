@@ -1,0 +1,73 @@
+{
+  "reports": [
+    {
+      "id": "report-1",
+      "title": "2024 全球 UI/UX 设计趋势报告",
+      "description": "深度解析极简主义、Bento 布局与沉浸式设计。",
+      "image": "/modern-ui-interface-design-dashboard.jpg",
+      "date": "2024-01-10",
+      "tag": "NEW",
+      "content": "这里是 2024 全球 UI/UX 设计趋势报告的详细内容..."
+    },
+    {
+      "id": "report-2",
+      "title": "AIGC 在商业设计中的应用白皮书",
+      "description": "从效率到创意，解析 AI 如何重塑设计工作流。",
+      "image": "/modern-tech-design-with-neon-blue-and-purple-gradi.jpg",
+      "date": "2023-12-15",
+      "content": "这里是 AIGC 在商业设计中的应用白皮书的详细内容..."
+    }
+  ],
+  "articles": [
+    {
+      "id": "article-1",
+      "title": "营销 90：如何用视觉语言讲好品牌故事",
+      "description": "通过色彩、构图与排版，建立与消费者的情感连接。",
+      "image": "/vibrant-social-media-post.png",
+      "date": "2024-01-05",
+      "content": "这里是营销 90 文章的详细内容..."
+    },
+    {
+      "id": "article-2",
+      "title": "大促活动中的高转化头图设计法则",
+      "description": "实战案例分析，教你如何提升点击率。",
+      "image": "/double11-banner.png",
+      "date": "2023-11-20",
+      "content": "这里是大促活动设计法则的详细内容..."
+    }
+  ],
+  "guidelines": [
+    {
+      "id": "guide-1",
+      "title": "重点活动规范",
+      "description": "S级/A级大促设计标准。",
+      "image": "/brand-identity-concept-with-minimalist-logo.jpg",
+      "icon": "Zap",
+      "content": "这里是重点活动规范的详细内容..."
+    },
+    {
+      "id": "guide-2",
+      "title": "日常活动规范",
+      "description": "运营/月度活动标准。",
+      "image": "/professional-business-poster-with-clean-typography.jpg",
+      "icon": "Calendar",
+      "content": "这里是日常活动规范的详细内容..."
+    },
+    {
+      "id": "guide-3",
+      "title": "资源位规范",
+      "description": "Banner/弹窗/浮层标准。",
+      "image": "/fashion-magazine-style-design-layout.jpg",
+      "icon": "Layout",
+      "content": "这里是资源位规范的详细内容..."
+    },
+    {
+      "id": "guide-4",
+      "title": "美团会员活动规范",
+      "description": "会员专享/专属活动标准。",
+      "image": "/cute-mascot-eating-hotpot-at-cozy-table.jpg",
+      "icon": "UserCheck",
+      "content": "这里是美团会员活动规范的详细内容..."
+    }
+  ]
+}

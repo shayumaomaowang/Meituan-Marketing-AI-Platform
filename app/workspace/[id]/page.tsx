@@ -1,0 +1,819 @@
+'use client';
+
+import { useEffect, useState, useRef } from 'react';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Card } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { ArrowLeft, Loader2, Save, Download } from 'lucide-react';
+import Link from 'next/link';
+import { toast } from 'sonner';
+
+// Static Template Components
+import { useCanvasEditor } from '@/hooks/useCanvasEditor';
+import { CanvasPreview } from '@/components/canvas/CanvasPreview';
+import { CanvasProperties } from '@/components/canvas/CanvasProperties';
+
+// Lottie Template Components
+import { LottiePlayer } from '@/components/lottie/LottiePlayer';
+import { ElementEditor } from '@/components/lottie/ElementEditor';
+import { parseLottie, EditableElement, LottieJSON, updateLottieData } from '@/lib/lottie-utils';
+
+// Logo Components
+import { LottieLogoEditor } from '@/components/workspace/LottieLogoEditor';
+import { LottieLogoOverlay } from '@/components/workspace/LottieLogoOverlay';
+import { LogoConfig, DEFAULT_LOGO_CONFIG } from '@/lib/logo-types';
+
+export default function WorkspacePage() {
+  const params = useParams();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const designTemplateId = params.id as string;
+  
+  // 获取 URL 参数中的 mode，默认为 static
+  const modeParam = searchParams.get('mode') as 'static' | 'dynamic' | null;
+  
+  const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState<'static' | 'lottie'>(modeParam === 'dynamic' ? 'lottie' : 'static');
+  const [designData, setDesignData] = useState<any>(null);
+
+  // --- Static Template State ---
+  const canvasEditor = useCanvasEditor();
+
+  // --- Lottie Template State ---
+  const [lottieData, setLottieData] = useState<LottieJSON | null>(null);
+  const [lottieElements, setLottieElements] = useState<EditableElement[]>([]);
+  const [isDownloading, setIsDownloading] = useState(false);
+  
+  // --- Lottie Logo State ---
+  const [logoConfig, setLogoConfig] = useState<LogoConfig>(DEFAULT_LOGO_CONFIG);
+  const [lottiePlayerSize, setLottiePlayerSize] = useState({ width: 500, height: 500 });
+  const lottiePlayerRef = useRef<HTMLDivElement>(null);
+
+  // 监听 Lottie Player 大小变化
+  useEffect(() => {
+    const player = lottiePlayerRef.current;
+    if (!player) return;
+
+    const resizeObserver = new ResizeObserver((entries) => {
+      for (let entry of entries) {
+        setLottiePlayerSize({
+          width: Math.round(entry.contentRect.width),
+          height: Math.round(entry.contentRect.height)
+        });
+      }
+    });
+
+    resizeObserver.observe(player);
+    return () => resizeObserver.disconnect();
+  }, []);
+
+  useEffect(() => {
+    const loadData = async () => {
+      try {
+        // 1. Fetch Design Template Info
+        const designRes = await fetch(`/api/design-templates/${designTemplateId}`);
+        if (!designRes.ok) {
+          toast.error('未找到设计模板');
+          router.push('/design-templates');
+          return;
+        }
+        const data = await designRes.json();
+        setDesignData(data);
+
+        // 2. Load Static Template
+        // 优先使用设计模板中保存的副本 (customData)
+        if (data.customData) {
+          canvasEditor.setName(data.customData.name);
+          canvasEditor.setWidth(data.customData.width);
+          canvasEditor.setHeight(data.customData.height);
+          canvasEditor.setLayout(data.customData.layout);
+          canvasEditor.setLayers(data.customData.layers);
+        } else if (data.customTemplateId) {
+          // 如果没有副本，则加载原始模板作为初始值
+          const staticRes = await fetch(`/api/custom-templates/${data.customTemplateId}`);
+          if (staticRes.ok) {
+            const staticData = await staticRes.json();
+            canvasEditor.setName(staticData.name);
+            canvasEditor.setWidth(staticData.width);
+            canvasEditor.setHeight(staticData.height);
+            canvasEditor.setLayout(staticData.layout);
+            canvasEditor.setLayers(staticData.layers);
+          }
+        }
+
+        // 3. Load Lottie Template
+        if (data.lottieTemplateId) {
+          // 使用新 API 获取单个 Lottie 数据
+          const lottieRes = await fetch(`/api/lottie-templates/${data.lottieTemplateId}`);
+          if (lottieRes.ok) {
+            const targetLottie = await lottieRes.json();
+            setLottieData(targetLottie);
+            
+            // 优先使用模板中预定义的 elements (包含 isEditable 配置)
+            // 如果没有，则解析原始 Lottie 数据
+            let initialElements: EditableElement[] = [];
+            if (targetLottie.elements && Array.isArray(targetLottie.elements) && targetLottie.elements.length > 0) {
+              initialElements = targetLottie.elements;
+            } else {
+              initialElements = parseLottie(targetLottie);
+            }
+            
+            // 如果有保存的修改 (lottieChanges)，应用它们
+            if (data.lottieChanges && Array.isArray(data.lottieChanges)) {
+              const mergedElements = initialElements.map(el => {
+                const change = data.lottieChanges.find((c: any) => c.id === el.id);
+                return change ? { ...el, ...change } : el;
+              });
+              setLottieElements(mergedElements);
+            } else {
+              setLottieElements(initialElements);
+            }
+            
+            // 加载 Logo 配置
+            if (data.logoConfig) {
+              setLogoConfig(data.logoConfig);
+            }
+          } else {
+            console.error('Failed to load lottie:', await lottieRes.text());
+          }
+        }
+
+        setLoading(false);
+      } catch (error) {
+        console.error(error);
+        toast.error('加载模板数据失败');
+        setLoading(false);
+      }
+    };
+
+    loadData();
+  }, [designTemplateId]);
+
+  // 获取当前的 Lottie 动画数据（包含编辑后的元素）
+  const getCurrentLottieData = () => {
+    if (!lottieData) return null;
+    console.log('📊 [getCurrentLottieData] lottieElements 详情:', lottieElements.map(el => ({
+      id: el.id,
+      type: el.type,
+      name: el.name,
+      hasCurrentValue: !!el.currentValue,
+      currentValueStart: el.currentValue?.substring(0, 50)
+    })));
+    return updateLottieData(lottieData, lottieElements);
+  };
+
+  // 下载 Lottie JSON（包含所有 Base64 图片）
+  const downloadLottie = async () => {
+    try {
+      setIsDownloading(true);
+      
+      let data = getCurrentLottieData();
+      if (!data) {
+        toast.error('没有可下载的数据');
+        setIsDownloading(false);
+        return;
+      }
+      
+      // 1️⃣ 确保所有图片都转换为 Base64
+      console.log('📸 [downloadLottie] assets 详情:', data.assets?.map((a: any) => ({ id: a.id, p: a.p?.substring(0, 100) })));
+      if (data.assets && Array.isArray(data.assets)) {
+        const conversions = data.assets.map(async (asset: any) => {
+          if (asset.p && !asset.p.startsWith('data:image')) {
+            console.log(`🔄 [downloadLottie] 转换 ${asset.id}: ${asset.p}`);
+            try {
+              // 如果是相对路径，补全为完整 URL
+              let imageUrl = asset.p;
+              if (!imageUrl.startsWith('http')) {
+                imageUrl = window.location.origin + (imageUrl.startsWith('/') ? '' : '/') + imageUrl;
+              }
+              console.log(`   完整 URL: ${imageUrl}`);
+              
+              const response = await fetch(imageUrl);
+              console.log(`   响应状态: ${response.status}`);
+              if (response.ok) {
+                const blob = await response.blob();
+                const dataUrl = await new Promise<string>((resolve) => {
+                  const reader = new FileReader();
+                  reader.onloadend = () => {
+                    resolve(reader.result as string);
+                  };
+                  reader.readAsDataURL(blob);
+                });
+                asset.p = dataUrl;
+                console.log(`   ✅ 已转换: ${asset.id} (${(dataUrl.length / 1024).toFixed(2)} KB)`);
+              } else {
+                console.warn(`   ⚠️ 返回状态 ${response.status}`);
+              }
+            } catch (err) {
+              console.error(`❌ 转换失败: ${asset.p}`, err);
+            }
+          } else if (asset.p?.startsWith('data:image')) {
+            console.log(`✅ 已是 Base64: ${asset.id}`);
+          } else {
+            console.log(`⚠️ 无效资源: ${asset.id}, p=${asset.p}`);
+          }
+        });
+        await Promise.all(conversions);
+      }
+      
+      // 2️⃣ 清理无效资源和重复 Base64 数据
+      // 移除 assets 中无效的资源（p 为 undefined 或空）
+      if (data.assets && Array.isArray(data.assets)) {
+        data.assets = data.assets.filter((asset: any) => {
+          const isValid = asset.p && (asset.p.startsWith('data:image') || asset.p.startsWith('http'));
+          if (!isValid) {
+            console.log(`🗑️ 移除无效资源: ${asset.id}`);
+          }
+          return isValid;
+        });
+        console.log(`✅ 清理后 assets 数量: ${data.assets.length}`);
+      }
+      
+      // 清理 layers 中的重复 Base64 数据，并检查 refId 引用
+      const cleanupBase64 = (obj: any): void => {
+        if (!obj || typeof obj !== 'object') return;
+        for (const key in obj) {
+          if (obj.hasOwnProperty(key)) {
+            if (typeof obj[key] === 'string' && obj[key].startsWith('data:image')) {
+              delete obj[key];
+            } else if (typeof obj[key] === 'object') {
+              cleanupBase64(obj[key]);
+            }
+          }
+        }
+      };
+      data.layers?.forEach((layer: any) => cleanupBase64(layer));
+      
+      // 检查 layers 中是否有无效的 refId（指向已删除的资源），并删除这些孤立的 layers
+      console.log('🔍 [downloadLottie] 检查并清理无效的 layer refId:');
+      const validAssetIds = new Set(data.assets?.map((a: any) => a.id));
+      const layersBeforeCleanup = data.layers?.length || 0;
+      
+      data.layers = data.layers?.filter((layer: any, idx: number) => {
+        if (layer.refId && !validAssetIds.has(layer.refId)) {
+          console.warn(`   🗑️ 删除引用不存在资源的 layer[${idx}]: ${layer.nm} (refId: ${layer.refId})`);
+          return false;  // 删除此 layer
+        }
+        return true;
+      }) || [];
+      
+      const layersAfterCleanup = data.layers.length;
+      if (layersBeforeCleanup !== layersAfterCleanup) {
+        console.log(`   ✅ 已清理 ${layersBeforeCleanup - layersAfterCleanup} 个孤立 layer，剩余 ${layersAfterCleanup} 个`);
+      }
+      
+      // 3️⃣ 序列化并下载
+      console.log('🔍 [downloadLottie] 序列化前数据验证:');
+      console.log('   v (版本):', data.v);
+      console.log('   fr (帧率):', data.fr);
+      console.log('   ip (起始帧):', data.ip);
+      console.log('   op (结束帧):', data.op);
+      console.log('   w (宽):', data.w);
+      console.log('   h (高):', data.h);
+      console.log('   assets 数量:', data.assets?.length);
+      console.log('   layers 数量:', data.layers?.length);
+      
+      // 检查第一个 asset 的结构
+      if (data.assets && data.assets.length > 0) {
+        console.log('   第一个 asset:', {
+          id: data.assets[0].id,
+          p: data.assets[0].p?.substring(0, 50),
+          u: data.assets[0].u,
+          t: data.assets[0].t
+        });
+      }
+      
+      // 检查第一个 layer
+      if (data.layers && data.layers.length > 0) {
+        console.log('   第一个 layer:', {
+          ty: data.layers[0].ty,
+          nm: data.layers[0].nm,
+          refId: data.layers[0].refId
+        });
+      }
+      
+      // 🔧 关键修复：只序列化标准 Lottie 字段，忽略额外的字段（如 id, createdAt, originalData 等）
+      // 深度复制 assets 和 layers，确保包含所有修改（Base64、清理等）
+      const lottieOnly = {
+        v: data.v,
+        fr: data.fr,
+        ip: data.ip,
+        op: data.op,
+        w: data.w,
+        h: data.h,
+        nm: data.nm,
+        ddd: data.ddd,
+        assets: JSON.parse(JSON.stringify(data.assets || [])),
+        layers: JSON.parse(JSON.stringify(data.layers || [])),
+        markers: data.markers,
+        ...(data.comps && { comps: JSON.parse(JSON.stringify(data.comps)) }),
+        ...(data.fonts && { fonts: JSON.parse(JSON.stringify(data.fonts)) }),
+        ...(data.chars && { chars: JSON.parse(JSON.stringify(data.chars)) }),
+      };
+      
+      console.log('🔧 [downloadLottie] 生成纯 Lottie JSON，包含字段:', Object.keys(lottieOnly));
+      console.log('🔧 [downloadLottie] assets 中 Base64 数量:', lottieOnly.assets?.filter((a: any) => a.p?.startsWith('data:image')).length);
+      
+      // 🔧 关键修复：确保所有 Base64 资源的格式完全符合上传文件的标准
+      // 对标上传的 Lottie 文件格式：u="", e=1, p="data:image/..."
+      (lottieOnly.assets || []).forEach((asset: any) => {
+        if (asset.p?.startsWith('data:image')) {
+          // 规范化 Base64 资源
+          asset.u = '';  // u 为空
+          asset.e = 1;   // e=1 表示内嵌 Base64
+          // 删除 t 字段（上传的文件中没有 t 字段）
+          if (asset.t) delete asset.t;
+          console.log(`   🔧 规范化资源 ${asset.id}: u='', e=1, 移除 t 字段`);
+        }
+      });
+      
+      // 直接输出纯 JSON（不用 ZIP）
+      const jsonString = JSON.stringify(lottieOnly);
+      const blob = new Blob([jsonString], { type: 'application/json;charset=utf-8' });
+      const fileSize = (blob.size / 1024 / 1024).toFixed(2);
+      
+      console.log(`📝 [downloadLottie] JSON 文件大小: ${fileSize} MB`);
+      console.log(`📝 [downloadLottie] 完整 JSON 格式验证，第一个 asset:`, lottieOnly.assets?.[0]);
+      
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${designData?.title || 'lottie'}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      
+      toast.success(`✨ Lottie JSON 下载成功！\n📦 文件大小: ${fileSize} MB\n✅ Assets: ${data.assets?.length} 个 | Layers: ${data.layers?.length} 个`);
+    } catch (error) {
+      console.error('下载失败:', error);
+      toast.error('下载失败');
+    } finally {
+      setIsDownloading(false);
+    }
+  };
+
+  // 下载 JSON（保留用于调试）
+  const downloadJSON = async () => {
+    try {
+      console.log('🔵 [downloadJSON] 开始下载...');
+      console.log('📋 [downloadJSON] lottieElements 数量:', lottieElements.length);
+      let data = getCurrentLottieData();
+      if (!data) {
+        toast.error('没有可下载的数据');
+        return;
+      }
+      
+      // 🔍 关键：确保所有图片都转换为 Base64
+      console.log('📸 [downloadJSON] 检查并转换图片资源为 Base64...');
+      if (data.assets && Array.isArray(data.assets)) {
+        const conversions = data.assets.map(async (asset: any) => {
+          // 如果图片数据不是 Base64，尝试加载并转换
+          if (asset.p && !asset.p.startsWith('data:image')) {
+            console.log(`   转换: ${asset.id} (${asset.p})`);
+            try {
+              const response = await fetch(asset.p);
+              if (response.ok) {
+                const blob = await response.blob();
+                const dataUrl = await new Promise<string>((resolve) => {
+                  const reader = new FileReader();
+                  reader.onloadend = () => {
+                    resolve(reader.result as string);
+                  };
+                  reader.readAsDataURL(blob);
+                });
+                asset.p = dataUrl;
+                console.log(`   ✅ 已转换: ${asset.id} (${(dataUrl.length / 1024).toFixed(2)} KB)`);
+              } else {
+                console.warn(`   ⚠️ 无法加载: ${asset.p}`);
+              }
+            } catch (err) {
+              console.error(`   ❌ 转换失败: ${asset.p}`, err);
+            }
+          }
+        });
+        
+        // 等待所有转换完成
+        await Promise.all(conversions);
+      }
+      console.log('📝 [downloadJSON] 生成的 data.assets 数量:', data.assets?.length);
+      console.log('📝 [downloadJSON] data.assets 详情:', data.assets?.map((a: any) => ({
+        id: a.id,
+        p: a.p?.substring(0, 50) || 'EMPTY',
+        hasBase64: a.p?.startsWith('data:image') ? '✅ 有Base64' : '❌ 无Base64'
+      })));
+
+      // 🔍 深度检查 Base64 数据完整性
+      const base64Assets = data.assets?.filter((a: any) => a.p?.startsWith('data:image')) || [];
+      console.log(`📊 [downloadJSON] Base64 图片数量: ${base64Assets.length}`);
+      base64Assets.forEach((asset: any, idx: number) => {
+        const base64Len = asset.p?.length || 0;
+        // 检查是否被截断（正常 Base64 应该至少 200+ 字符）
+        const isTruncated = base64Len < 200;
+        console.log(`   [${idx}] ${asset.id}: ${base64Len} 字符 (${(base64Len / 1024).toFixed(2)} KB) ${isTruncated ? '❌ 可能被截断' : '✅'}`);
+        // 打印前 100 字符用于调试
+        if (isTruncated) {
+          console.log(`        完整数据: ${asset.p}`);
+        } else {
+          console.log(`        前 100 字: ${asset.p?.substring(0, 100)}...`);
+        }
+      });
+      
+      // 🔍 检查是否所有图片都有 Base64 或 URL
+      const allImages = data.assets?.filter((a: any) => a.p) || [];
+      const imagesWithoutData = allImages.filter((a: any) => !a.p?.startsWith('data:image') && !a.p?.startsWith('http') && a.p !== 'EMPTY');
+      if (imagesWithoutData.length > 0) {
+        console.warn(`⚠️ [downloadJSON] 发现 ${imagesWithoutData.length} 个图片没有完整的数据:`, imagesWithoutData.map((a: any) => ({ id: a.id, p: a.p?.substring(0, 50) })));
+      }
+      
+      // 🔍 最终完整性检查：输出整个 assets 数组用于调试
+      console.log('🔍 [downloadJSON] 完整 assets 对象:', JSON.stringify(data.assets?.slice(0, 3), null, 2));
+
+      // 🔍 关键修复：在序列化前，删除 layers 中所有的 Base64 数据
+      // 这些数据应该只存在于 assets 中
+      console.log('🧹 [downloadJSON] 清理 layers 中的重复 Base64 数据...');
+      let cleanedBase64Count = 0;
+      const cleanupLayersBase64 = (obj: any): void => {
+        if (!obj || typeof obj !== 'object') return;
+        
+        for (const key in obj) {
+          if (obj.hasOwnProperty(key)) {
+            if (typeof obj[key] === 'string' && obj[key].startsWith('data:image')) {
+              delete obj[key];
+              cleanedBase64Count++;
+            } else if (typeof obj[key] === 'object') {
+              cleanupLayersBase64(obj[key]);
+            }
+          }
+        }
+      };
+      
+      data.layers?.forEach((layer: any) => {
+        cleanupLayersBase64(layer);
+      });
+      
+      if (cleanedBase64Count > 0) {
+        console.log(`   ✅ 已清理 ${cleanedBase64Count} 个重复的 Base64 数据`);
+      }
+      
+      // 优化：压缩 JSON 大小
+      const jsonString = JSON.stringify(data, null, 2);
+      const originalSize = jsonString.length / 1024 / 1024;
+      console.log('📄 [downloadJSON] 最终 JSON 大小:', (originalSize).toFixed(2), 'MB');
+      
+      // 🔍 在序列化后再检查一次 Base64
+      // ⚠️ 修复：只计算 assets 中的 Base64，不计算其他地方可能重复出现的
+      const assetsSection = jsonString.match(/"assets":\s*\[([\s\S]*?)\]/)?.[1] || '';
+      const serializedBase64Count = (assetsSection.match(/"p":\s*"data:image\//g) || []).length;
+      console.log(`📄 [downloadJSON] 序列化后 Base64 图片数量 (assets中): ${serializedBase64Count}`);
+      
+      // 检查是否有重复的 Base64 (出现在 assets 以外的地方)
+      const totalBase64InJson = (jsonString.match(/"p":\s*"data:image\//g) || []).length;
+      if (totalBase64InJson > serializedBase64Count) {
+        console.warn(`⚠️ [downloadJSON] 检测到重复的 Base64 数据! 总数:${totalBase64InJson}, assets中:${serializedBase64Count}, 重复:${totalBase64InJson - serializedBase64Count}`);
+      }
+      
+      // 创建 blob 并下载
+      const blob = new Blob([jsonString], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${designData?.title || 'lottie'}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      toast.success(`JSON 下载成功 (${originalSize.toFixed(2)} MB)`);
+    } catch (error) {
+      console.error('下载 JSON 失败:', error);
+      toast.error('JSON 下载失败');
+    }
+  };
+
+  // 下载 MP4（使用 Canvas 录制）
+  const downloadMP4 = async () => {
+    try {
+      setIsDownloading(true);
+      const data = getCurrentLottieData();
+      if (!data) {
+        toast.error('没有可录制的内容');
+        setIsDownloading(false);
+        return;
+      }
+
+      // 创建一个临时容器来渲染 Lottie
+      const tempContainer = document.createElement('div');
+      tempContainer.style.width = '1080px';
+      tempContainer.style.height = '1080px';
+      tempContainer.style.position = 'absolute';
+      tempContainer.style.left = '-9999px';
+      tempContainer.style.background = '#000000';
+      document.body.appendChild(tempContainer);
+
+      // 创建 Canvas
+      const canvas = document.createElement('canvas');
+      canvas.width = 1080;
+      canvas.height = 1080;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        toast.error('无法创建 Canvas');
+        document.body.removeChild(tempContainer);
+        setIsDownloading(false);
+        return;
+      }
+
+      // 加载 Lottie
+      const lottie = (await import('lottie-web')).default;
+      const animation = lottie.loadAnimation({
+        container: tempContainer,
+        renderer: 'svg',
+        animationData: data,
+        autoplay: true,
+        loop: false
+      });
+
+      // 等待动画准备完成
+      await new Promise(resolve => {
+        animation.addEventListener('DOMLoaded', resolve);
+      });
+
+      // 获取帧率
+      const frameRate = animation.frameRate || 60;
+      const totalFrames = animation.totalFrames;
+
+      // 使用 MediaRecorder 录制
+      const stream = canvas.captureStream(frameRate);
+      const mediaRecorder = new MediaRecorder(stream, {
+        mimeType: 'video/webm;codecs=vp9',
+        videoBitsPerSecond: 5000000
+      });
+
+      const chunks: Blob[] = [];
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) {
+          chunks.push(e.data);
+        }
+      };
+
+      mediaRecorder.onstop = () => {
+        const blob = new Blob(chunks, { type: 'video/webm' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${designData?.title || 'lottie'}.webm`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        animation.destroy();
+        document.body.removeChild(tempContainer);
+        setIsDownloading(false);
+        toast.success('视频下载成功');
+      };
+
+      mediaRecorder.start();
+
+      // 逐帧渲染
+      let currentFrame = 0;
+      const renderFrame = async () => {
+        if (currentFrame >= totalFrames) {
+          mediaRecorder.stop();
+          return;
+        }
+
+        animation.goToAndStop(currentFrame, true);
+
+        // 等待 SVG 渲染
+        await new Promise(resolve => setTimeout(resolve, 16));
+
+        // 绘制到 Canvas
+        const svg = tempContainer.querySelector('svg');
+        if (svg) {
+          const svgData = new XMLSerializer().serializeToString(svg);
+          const svgBlob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
+          const svgUrl = URL.createObjectURL(svgBlob);
+
+          const img = new Image();
+          img.onload = () => {
+            ctx.fillStyle = '#000000';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+            URL.revokeObjectURL(svgUrl);
+            currentFrame++;
+            requestAnimationFrame(renderFrame);
+          };
+          img.onerror = () => {
+            console.error('图片加载失败');
+            currentFrame++;
+            requestAnimationFrame(renderFrame);
+          };
+          img.src = svgUrl;
+        } else {
+          currentFrame++;
+          requestAnimationFrame(renderFrame);
+        }
+      };
+
+      renderFrame();
+
+    } catch (error) {
+      console.error('下载 MP4 失败:', error);
+      toast.error('视频下载失败');
+      setIsDownloading(false);
+    }
+  };
+
+  const handleSave = async () => {
+    if (!designTemplateId) return;
+
+    // 准备要保存的数据
+    const customData = {
+      name: canvasEditor.name,
+      width: canvasEditor.width,
+      height: canvasEditor.height,
+      layout: canvasEditor.layout,
+      layers: canvasEditor.layers
+    };
+
+    // 只保存 Lottie 中被修改过的元素，或者保存所有元素的状态
+    // 为了简单和完整性，我们保存所有当前元素的状态
+    const lottieChanges = lottieElements;
+    
+    // 保存 Logo 配置
+    const logoConfigData = logoConfig;
+
+    try {
+      // 更新设计模板本身，而不是原始模板
+      const res = await fetch(`/api/design-templates/${designTemplateId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          customData,      // 保存静态模板副本
+          lottieChanges,   // 保存动态模板修改
+          logoConfig: logoConfigData  // 保存 Logo 配置
+        }),
+      });
+
+      if (res.ok) {
+        toast.success('所有更改已保存');
+      } else {
+        toast.error('保存失败');
+      }
+    } catch (error) {
+      toast.error('保存失败');
+    }
+  };
+
+  if (loading) {
+    return <div className="flex items-center justify-center min-h-screen"><Loader2 className="animate-spin h-8 w-8 text-primary" /></div>;
+  }
+
+  return (
+    <div className="flex flex-col h-screen bg-background">
+      {/* Header */}
+      <header className="h-14 border-b flex items-center justify-between px-4 bg-card">
+        <div className="flex items-center gap-4">
+          <Link href="/design-templates" className="text-muted-foreground hover:text-primary">
+            <ArrowLeft className="h-5 w-5" />
+          </Link>
+          <h1 className="font-semibold">工作台: {designData?.title || '未命名'}</h1>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button size="sm" onClick={handleSave}>
+            <Save className="mr-2 h-4 w-4" /> 保存所有更改
+          </Button>
+        </div>
+      </header>
+
+      {/* Main Content */}
+      <div className="flex-1 overflow-hidden">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="h-full flex flex-col">
+          
+          {/* Tab Navigation */}
+          <div className="border-b px-4 bg-muted/20">
+            <TabsList className="my-2">
+              <TabsTrigger value="static">静态模板 (自定义)</TabsTrigger>
+              <TabsTrigger value="lottie">动态模板 (Lottie)</TabsTrigger>
+            </TabsList>
+          </div>
+
+          <div className="flex-1 flex overflow-hidden">
+            {/* Left: Preview Area */}
+            <div className="flex-1 bg-muted/10 p-4 overflow-hidden relative flex flex-col">
+              <TabsContent value="static" className="flex-1 mt-0 h-full data-[state=inactive]:hidden">
+                <CanvasPreview 
+                  width={canvasEditor.width}
+                  height={canvasEditor.height}
+                  scale={canvasEditor.scale}
+                  setScale={canvasEditor.setScale}
+                  layers={canvasEditor.layers}
+                  selectedLayerId={canvasEditor.selectedLayerId}
+                  setSelectedLayerId={canvasEditor.setSelectedLayerId}
+                  snapLines={canvasEditor.snapLines}
+                  setSnapLines={canvasEditor.setSnapLines}
+                  interaction={canvasEditor.interaction}
+                  setInteraction={canvasEditor.setInteraction}
+                  updateLayer={canvasEditor.updateLayer}
+                  autoFit={canvasEditor.autoFit}
+                  viewportRef={canvasEditor.viewportRef}
+                />
+              </TabsContent>
+              
+              <TabsContent value="lottie" className="flex-1 mt-0 h-full flex flex-col items-center justify-center data-[state=inactive]:hidden relative">
+                {lottieData ? (
+                  <div className="w-full h-full flex items-center justify-center bg-muted/30 rounded-xl border-2 border-dashed border-muted relative p-8">
+                    <div className="w-full h-full flex items-center justify-center relative">
+                      <div ref={lottiePlayerRef} className="relative inline-block">
+                        <LottiePlayer 
+                          animationData={lottieData} 
+                          editableElements={lottieElements}
+                          className="max-w-4xl max-h-96"
+                        />
+                        {/* Logo 覆盖层 */}
+                        <div className="absolute inset-0">
+                          <LottieLogoOverlay 
+                            config={logoConfig}
+                            containerWidth={lottiePlayerSize.width}
+                            containerHeight={lottiePlayerSize.height}
+                            onPositionChange={(x, y) => {
+                              setLogoConfig({ ...logoConfig, x, y });
+                            }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* 下载按钮组 - 画布下方 */}
+                    <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex gap-3 z-20">
+                      <Button
+                        onClick={downloadLottie}
+                        size="lg"
+                        className="bg-primary/80 hover:bg-primary text-white"
+                        disabled={isDownloading}
+                      >
+                        <Download className="mr-2 h-4 w-4" />
+                        下载 Lottie JSON（含图片）
+                      </Button>
+                      <Button
+                        onClick={downloadMP4}
+                        size="lg"
+                        className="bg-primary/80 hover:bg-primary text-white"
+                        disabled={isDownloading}
+                      >
+                        {isDownloading ? (
+                          <>
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            生成视频中...
+                          </>
+                        ) : (
+                          <>
+                            <Download className="mr-2 h-4 w-4" />
+                            下载 MP4
+                          </>
+                        )}
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="text-muted-foreground">加载 Lottie 数据中...</div>
+                )}
+              </TabsContent>
+            </div>
+
+            {/* Right: Properties Panel */}
+            <div className="w-96 border-l bg-card flex flex-col">
+              <TabsContent value="static" className="flex-1 mt-0 overflow-hidden data-[state=inactive]:hidden p-4">
+                <CanvasProperties 
+                  layers={canvasEditor.layers}
+                  updateLayer={canvasEditor.updateLayer}
+                  addLayer={canvasEditor.addLayer}
+                  deleteLayer={canvasEditor.deleteLayer}
+                  onSave={handleSave}
+                  selectedLayerId={canvasEditor.selectedLayerId}
+                />
+              </TabsContent>
+
+              <TabsContent value="lottie" className="flex-1 mt-0 overflow-y-auto data-[state=inactive]:hidden p-4">
+                <div className="space-y-4">
+                  <ElementEditor 
+                    elements={lottieElements} 
+                    onUpdate={setLottieElements} 
+                  />
+                  
+                  {/* Logo 编辑器 */}
+                  <LottieLogoEditor 
+                    config={logoConfig}
+                    onChange={setLogoConfig}
+                    onSave={handleSave}
+                  />
+                </div>
+              </TabsContent>
+            </div>
+          </div>
+        </Tabs>
+      </div>
+    </div>
+  );
+}

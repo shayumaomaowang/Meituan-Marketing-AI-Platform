@@ -1,0 +1,122 @@
+@import "tailwindcss";
+
+@plugin "tailwindcss-animate";
+
+@custom-variant dark (&:is(.dark *));
+
+@source "../app/**/*.{ts,tsx}";
+@source "../components/**/*.{ts,tsx}";
+
+@theme {
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+
+  --color-background: #0a0a0c;
+  --color-foreground: hsl(0 0% 98%);
+  --color-primary: #7c3aed;
+  --color-accent: #9333ea;
+  --color-border: rgba(255, 255, 255, 0.1);
+  
+  --radius-lg: 1rem;
+  --radius-md: calc(1rem - 2px);
+  --radius-sm: calc(1rem - 4px);
+}
+
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+  body {
+    background-color: #0a0a0c;
+    color: white;
+    margin: 0;
+    padding: 0;
+    min-height: 100vh;
+    font-family: var(--font-sans), sans-serif;
+    overflow-x: hidden;
+  }
+}
+
+/* 极简高级磨砂玻璃 */
+@utility glass-card {
+  background: rgba(255, 255, 255, 0.03);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.8);
+}
+
+/* 紫色呼吸发光边框 */
+@utility purple-glow {
+  position: relative;
+  &::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    padding: 1.5px;
+    background: linear-gradient(135deg, rgba(124, 58, 237, 0.6), transparent 40%, transparent 60%, rgba(147, 51, 234, 0.6));
+    -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    pointer-events: none;
+    filter: drop-shadow(0 0 8px rgba(124, 58, 237, 0.3));
+  }
+}
+
+/* 核心：背景弧光动效 */
+@keyframes rotate-arc {
+  0% { transform: translate(-50%, -50%) rotate(0deg) scale(1); }
+  50% { transform: translate(-50%, -50%) rotate(180deg) scale(1.1); }
+  100% { transform: translate(-50%, -50%) rotate(360deg) scale(1); }
+}
+
+.bg-arc-container {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.bg-arc-light {
+  position: absolute;
+  top: 20%;
+  left: 50%;
+  width: 140vw;
+  height: 140vw;
+  background: conic-gradient(
+    from 0deg at 50% 50%,
+    transparent 0deg,
+    rgba(124, 58, 237, 0) 100deg,
+    rgba(124, 58, 237, 0.18) 180deg,
+    rgba(147, 51, 234, 0.05) 240deg,
+    transparent 360deg
+  );
+  filter: blur(100px);
+  animation: rotate-arc 25s infinite linear;
+}
+
+.bg-spotlight {
+  position: absolute;
+  top: -10%;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 80vw;
+  height: 40vh;
+  background: radial-gradient(ellipse at center, rgba(124, 58, 237, 0.15) 0%, transparent 70%);
+  filter: blur(60px);
+}
+
+.bg-overlay-mesh {
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+  background-size: 40px 40px;
+  mask-image: radial-gradient(circle at center, black, transparent 80%);
+}
+
+/* 隐藏滚动条 */
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }

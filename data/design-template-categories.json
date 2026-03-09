@@ -1,0 +1,98 @@
+[
+  {
+    "id": "template-banner",
+    "name": "模板头图",
+    "isDefault": true,
+    "type": "primary"
+  },
+  {
+    "id": "external-poster",
+    "name": "外宣海报",
+    "isDefault": true,
+    "type": "primary"
+  },
+  {
+    "id": "station",
+    "name": "站台",
+    "isDefault": true,
+    "type": "primary"
+  },
+  {
+    "id": "banner",
+    "name": "banner",
+    "isDefault": true,
+    "type": "primary"
+  },
+  {
+    "id": "mini-program-share",
+    "name": "小程序分享图",
+    "isDefault": true,
+    "type": "primary"
+  },
+  {
+    "id": "floor-bar",
+    "name": "楼层条",
+    "isDefault": true,
+    "type": "primary"
+  },
+  {
+    "id": "platform",
+    "name": "平台",
+    "isDefault": true,
+    "type": "secondary"
+  },
+  {
+    "id": "takeout",
+    "name": "外卖",
+    "isDefault": true,
+    "type": "secondary"
+  },
+  {
+    "id": "hotel-travel",
+    "name": "酒旅",
+    "isDefault": true,
+    "type": "secondary"
+  },
+  {
+    "id": "medicine",
+    "name": "医药",
+    "isDefault": true,
+    "type": "secondary"
+  },
+  {
+    "id": "flash-sale",
+    "name": "闪购",
+    "isDefault": true,
+    "type": "secondary"
+  },
+  {
+    "id": "medicine-beauty",
+    "name": "医药医美",
+    "isDefault": true,
+    "type": "secondary"
+  },
+  {
+    "id": "group-buying-dining",
+    "name": "团购-到餐",
+    "isDefault": true,
+    "type": "secondary"
+  },
+  {
+    "id": "group-buying-retail",
+    "name": "团购-服务零售",
+    "isDefault": true,
+    "type": "secondary"
+  },
+  {
+    "id": "grocery-retail",
+    "name": "食杂零售",
+    "isDefault": true,
+    "type": "secondary"
+  },
+  {
+    "id": "financial-services",
+    "name": "金融服务",
+    "isDefault": true,
+    "type": "secondary"
+  }
+]

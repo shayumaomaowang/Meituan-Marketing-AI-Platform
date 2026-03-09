@@ -1,0 +1,27 @@
+[
+  {
+    "id": "background",
+    "name": "背景库",
+    "isDefault": true
+  },
+  {
+    "id": "decoration",
+    "name": "装饰库",
+    "isDefault": true
+  },
+  {
+    "id": "logo",
+    "name": "Logo库",
+    "isDefault": true
+  },
+  {
+    "id": "847b362e-a373-4f10-94d1-b896495d179d",
+    "name": "自由生图-参考图",
+    "isDefault": false
+  },
+  {
+    "id": "77756faf-4af1-4e30-815e-daef2a5df544",
+    "name": "参考生图",
+    "isDefault": false
+  }
+]
