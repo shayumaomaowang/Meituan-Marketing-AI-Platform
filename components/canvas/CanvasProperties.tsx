@@ -578,10 +578,64 @@ export function CanvasProperties({
       const isMemberPosterAgent = selectedAgent?.name === '会员海报';
 
       if (isMemberPosterAgent) {
-        // 会员海报agent：直接使用原尺寸，只替换图片src，不做任何缩放
-        console.log(`🎨 [主体替换] 会员海报agent，直接使用原尺寸填充，不缩放`);
-        updateLayer(layerIds.mainImage, { src: newImageSrc });
-        toast.success('主体已更新');
+        // 会员海报agent：保持新图片等比不变，缩放到填充满原图层尺寸
+        console.log(`🎨 [主体替换] 会员海报agent，等比缩放填充满原图层`);
+        
+        const newImg = new Image();
+        newImg.crossOrigin = 'Anonymous';
+        
+        await new Promise<void>((resolve) => {
+          newImg.onload = () => {
+            // 计算缩放比例，让新图片等比缩放到刚好填充满原图层
+            // 目标：类似 object-fit: cover 效果
+            const targetWidth = mainImageLayer.width;
+            const targetHeight = mainImageLayer.height;
+            const imgAspectRatio = newImg.width / newImg.height;
+            const targetAspectRatio = targetWidth / targetHeight;
+            
+            let newWidth, newHeight;
+            
+            if (imgAspectRatio > targetAspectRatio) {
+              // 新图片更宽：按高度适配，宽度裁剪
+              newHeight = targetHeight;
+              newWidth = newHeight * imgAspectRatio;
+            } else {
+              // 新图片更高：按宽度适配，高度裁剪
+              newWidth = targetWidth;
+              newHeight = newWidth / imgAspectRatio;
+            }
+            
+            // 保持原图层的中心位置
+            const newMainX = mainImageLayer.x + (mainImageLayer.width - newWidth) / 2;
+            const newMainY = mainImageLayer.y + (mainImageLayer.height - newHeight) / 2;
+            
+            console.log(`📐 [主体替换] 原图层尺寸: ${targetWidth}x${targetHeight}`);
+            console.log(`📐 [主体替换] 新图片原始尺寸: ${newImg.width}x${newImg.height}`);
+            console.log(`📐 [主体替换] 等比缩放后尺寸: ${newWidth.toFixed(0)}x${newHeight.toFixed(0)}`);
+            console.log(`📐 [主体替换] 中心位置: (${newMainX.toFixed(0)}, ${newMainY.toFixed(0)})`);
+            
+            // 更新图层
+            updateLayer(layerIds.mainImage, {
+              src: newImageSrc,
+              width: newWidth,
+              height: newHeight,
+              x: newMainX,
+              y: newMainY
+            });
+            
+            toast.success('主体已更新');
+            resolve();
+          };
+          
+          newImg.onerror = () => {
+            console.error('❌ [主体替换] 新图片加载失败，使用直接替换');
+            updateLayer(layerIds.mainImage, { src: newImageSrc });
+            toast.success('主体已更新');
+            resolve();
+          };
+          
+          newImg.src = newImageSrc;
+        });
       } else {
         // 其他模式：进行正常的缩放处理
         // 计算旧图片的有效面积（基于原始像素尺寸）
