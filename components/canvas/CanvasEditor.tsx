@@ -335,7 +335,7 @@ export function CanvasEditor({ initialData, onSave }: CanvasEditorProps) {
       {/* 中间：画布预览 */}
       <div 
         ref={viewportRef}
-        className="flex-1 bg-muted/30 rounded-xl border-2 border-dashed border-muted flex flex-col items-center justify-center relative overflow-hidden p-8"
+        className="flex-1 bg-black rounded-xl border-2 border-dashed border-muted flex flex-col items-center justify-center relative overflow-hidden p-8"
       >
         <div className="absolute top-4 left-4 flex items-center gap-4 z-20 bg-background/80 backdrop-blur p-2 rounded-lg border shadow-sm">
           <div className="flex items-center gap-2">
