@@ -48,6 +48,10 @@ export interface CanvasLayer {
   // Coze 字段映射标签
   cozeField?: string;
 
+  // Agent 相关配置
+  useAgent?: boolean;
+  selectedAgentId?: string;
+
   // 父子关系：当父图层移动/缩放时，子图层会保持相对位置关系
   parentId?: string;
 }

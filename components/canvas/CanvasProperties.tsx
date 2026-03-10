@@ -25,6 +25,9 @@ import {
   Settings2
 } from 'lucide-react';
 import { CanvasLayer, CustomTemplate } from '@/lib/canvas-utils';
+import { agentStorage } from '@/lib/agent-storage';
+import { Agent } from '@/lib/types/agent';
+import { AgentExecutor } from '@/lib/agent-executor';
 import { toast } from 'sonner';
 
 // 计算图片有效面积（排除透明像素）
@@ -141,21 +144,51 @@ export function CanvasProperties({
     logo: '',
     background: ''
   });
+  
+  // --- Agent 相关状态 ---
+  const [mainImageLayer, setMainImageLayer] = useState<CanvasLayer | null>(null);
+  const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
+  const [agents, setAgents] = useState<Agent[]>([]);
+
+  // 加载 Agent 列表
+  useEffect(() => {
+    setAgents(agentStorage.getAll());
+  }, []);
 
   useEffect(() => {
     // 基于图层的 cozeField 标签来识别图层（优先），或使用 name 作为备选
     const newIds = { ...layerIds };
     
-    // 找主体图片：查找 cozeField 中包含"主体"的图层，或 name 中包含"主体"的图层
-    const mainImg = layers.find(l => 
-      l.type === 'image' && (
-        (l.cozeField && l.cozeField.includes('主体')) || 
-        (l.name && l.name.includes('主体'))
-      )
+    // 找主体图片：优先查找使用 agent 的图层，其次查找 cozeField 中包含"主体"的图层，或 name 中包含"主体"的图层
+    let mainImg = layers.find(l => 
+      l.type === 'image' && l.useAgent === true
     );
+    
+    if (!mainImg) {
+      mainImg = layers.find(l => 
+        l.type === 'image' && (
+          (l.cozeField && l.cozeField.includes('主体')) || 
+          (l.name && l.name.includes('主体'))
+        )
+      );
+    }
+    
     if (mainImg) {
       newIds.mainImage = mainImg.id;
-      console.log(`✅ [CanvasProperties] 找到主体图片: ${mainImg.name} (cozeField=${mainImg.cozeField}, id=${mainImg.id})`);
+      setMainImageLayer(mainImg);
+      console.log(`✅ [CanvasProperties] 找到主体图片: ${mainImg.name} (useAgent=${mainImg.useAgent}, selectedAgentId=${mainImg.selectedAgentId}, cozeField=${mainImg.cozeField}, id=${mainImg.id})`);
+      
+      // 如果使用了 agent，查找对应的 agent 信息
+      if (mainImg.useAgent && mainImg.selectedAgentId) {
+        const agent = agentStorage.getById(mainImg.selectedAgentId);
+        setSelectedAgent(agent);
+        console.log(`✅ [CanvasProperties] 找到对应 Agent: ${agent?.name}`);
+      } else {
+        setSelectedAgent(null);
+      }
+    } else {
+      setMainImageLayer(null);
+      setSelectedAgent(null);
     }
 
     // 找 Logo：查找 cozeField 或 name 中包含"logo"或"Logo"的图层
@@ -190,8 +223,21 @@ export function CanvasProperties({
   // --- 2. 表单状态 ---
   const [subjectMode, setSubjectMode] = useState<'generate' | 'upload'>('upload');
   const [subjectPrompt, setSubjectPrompt] = useState('');
-  const [uploadedSubject, setUploadedSubject] = useState<string | null>(null);
+  const [uploadedSubjectManual, setUploadedSubjectManual] = useState<string | null>(null);
+  const [uploadedSubjectAgent, setUploadedSubjectAgent] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
+  
+  // 根据 agent 类型自动设置生成模式
+  useEffect(() => {
+    if (selectedAgent) {
+      console.log(`🔍 [CanvasProperties] 检测到 Agent: ${selectedAgent.name}`);
+      // 如果是"会员海报"agent，强制使用上传模式
+      if (selectedAgent.name === '会员海报') {
+        console.log(`✅ [CanvasProperties] 会员海报 agent，切换到上传模式`);
+        setSubjectMode('upload');
+      }
+    }
+  }, [selectedAgent]);
   
   const [selectedColor, setSelectedColor] = useState('red');
   const [titleText, setTitleText] = useState('');
@@ -401,7 +447,7 @@ export function CanvasProperties({
 
   // 处理主体更新
   const handleSubjectApply = async () => {
-    console.log(`📋 [handleSubjectApply] 开始，layerIds.mainImage=${layerIds.mainImage}`);
+    console.log(`📋 [handleSubjectApply] 开始，layerIds.mainImage=${layerIds.mainImage}, subjectMode=${subjectMode}`);
     if (!layerIds.mainImage) {
       console.error(`❌ [handleSubjectApply] 未找到主体图层 ID`);
       toast.error('未找到主体图层');
@@ -414,15 +460,71 @@ export function CanvasProperties({
       let newImageSrc = '';
 
       if (subjectMode === 'upload') {
-        if (!uploadedSubject) {
+        if (!uploadedSubjectManual) {
           toast.error('请先上传图片');
           setIsGenerating(false);
           return;
         }
-        newImageSrc = uploadedSubject;
-        console.log(`📤 [handleSubjectApply] 上传模式，新图片=${newImageSrc.slice(0, 50)}...`);
-        // 模拟处理延迟
+        newImageSrc = uploadedSubjectManual;
+        console.log(`📤 [handleSubjectApply] 手动上传模式，新图片=${newImageSrc.slice(0, 50)}...`);
+        // 普通上传模式
         await new Promise(resolve => setTimeout(resolve, 500));
+      } else if (subjectMode === 'generate' && selectedAgent) {
+        if (!uploadedSubjectAgent) {
+          toast.error('请先上传图片');
+          setIsGenerating(false);
+          return;
+        }
+        console.log(`🤖 [handleSubjectApply] 开始调用 Agent: ${selectedAgent.name}`);
+        toast.info(`图片已发送到「${selectedAgent.name}」Agent 处理...`);
+        
+        // 真正调用 AgentExecutor
+        const result = await AgentExecutor.execute({
+          agentId: selectedAgent.id,
+          userInput: '生成会员海报',
+          uploadedImages: {
+            productImage: uploadedSubjectAgent,
+          },
+        });
+        
+        console.log(`🤖 [handleSubjectApply] Agent 执行结果:`, result);
+        
+        if (!result.success || !result.output) {
+          toast.error(`Agent 处理失败: ${result.error || '未知错误'}`);
+          setIsGenerating(false);
+          return;
+        }
+        
+        // 获取 Agent 返回的图片
+        let agentImageSrc = result.output;
+        
+        // 如果返回的是对象，尝试提取图片URL
+        if (typeof agentImageSrc === 'object') {
+          if (agentImageSrc.url) {
+            agentImageSrc = agentImageSrc.url;
+          } else if (agentImageSrc.image) {
+            agentImageSrc = agentImageSrc.image;
+          } else if (Array.isArray(agentImageSrc) && agentImageSrc.length > 0) {
+            agentImageSrc = agentImageSrc[0].url || agentImageSrc[0].image || agentImageSrc[0];
+          }
+        }
+        
+        // 确保获取到的是有效的图片源
+        if (!agentImageSrc || typeof agentImageSrc !== 'string') {
+          toast.error('Agent 返回的结果格式不正确');
+          setIsGenerating(false);
+          return;
+        }
+        
+        // 如果是外部 URL（非 data URL），使用代理避免 CORS 问题
+        if (agentImageSrc.startsWith('http://') || agentImageSrc.startsWith('https://')) {
+          console.log(`🔗 [handleSubjectApply] 检测到外部图片URL，使用代理: ${agentImageSrc.slice(0, 80)}...`);
+          newImageSrc = `/api/proxy-image?url=${encodeURIComponent(agentImageSrc)}`;
+        } else {
+          newImageSrc = agentImageSrc;
+        }
+        console.log(`🤖 [handleSubjectApply] Agent 处理完成，新图片=${newImageSrc.slice(0, 50)}...`);
+        toast.success(`「${selectedAgent.name}」Agent 处理完成！`);
       } else {
         // 真实的 AI 生成 - 调用 Coze Canvas API
         if (!subjectPrompt) {
@@ -472,119 +574,130 @@ export function CanvasProperties({
         return;
       }
 
-      // 计算旧图片的有效面积（基于原始像素尺寸）
-      const oldEffectiveArea = await calculateEffectiveArea(mainImageLayer.src);
-      console.log(`📐 [主体替换] 旧图片有效面积（像素）: ${oldEffectiveArea}`);
+      // 判断是否是会员海报agent
+      const isMemberPosterAgent = selectedAgent?.name === '会员海报';
 
-      // 计算新图片的有效面积和尺寸
-      const newImg = new Image();
-      newImg.crossOrigin = 'Anonymous';
-      
-      await new Promise<void>((resolve) => {
-        newImg.onload = () => {
-          // 在回调中需要获取旧图层的原始图片尺寸来做正确的比例计算
-          const oldImg = new Image();
-          oldImg.crossOrigin = 'Anonymous';
-          oldImg.onload = () => {
-            calculateEffectiveArea(newImageSrc).then(newEffectiveArea => {
-              console.log(`📐 [主体替换] 新图片有效面积（像素）: ${newEffectiveArea}`);
-              console.log(`📐 [主体替换] 旧图片原始尺寸: ${oldImg.width}x${oldImg.height}, 在画布中显示: ${mainImageLayer.width}x${mainImageLayer.height}`);
-              console.log(`📐 [主体替换] 新图片原始尺寸: ${newImg.width}x${newImg.height}`);
+      if (isMemberPosterAgent) {
+        // 会员海报agent：直接使用原尺寸，只替换图片src，不做任何缩放
+        console.log(`🎨 [主体替换] 会员海报agent，直接使用原尺寸填充，不缩放`);
+        updateLayer(layerIds.mainImage, { src: newImageSrc });
+        toast.success('主体已更新');
+      } else {
+        // 其他模式：进行正常的缩放处理
+        // 计算旧图片的有效面积（基于原始像素尺寸）
+        const oldEffectiveArea = await calculateEffectiveArea(mainImageLayer.src);
+        console.log(`📐 [主体替换] 旧图片有效面积（像素）: ${oldEffectiveArea}`);
 
-              // 如果新旧面积都有效，计算缩放比例
-              if (oldEffectiveArea > 0 && newEffectiveArea > 0) {
-                // 关键：计算"显示尺寸与原始尺寸的比例"
-                // oldDisplayScale: 旧图片在画布中的实际显示尺寸 / 旧图片的原始像素尺寸
-                const oldDisplayScaleX = mainImageLayer.width / oldImg.width;
-                const oldDisplayScaleY = mainImageLayer.height / oldImg.height;
-                
-                // 旧图片在画布中的"视觉有效面积" = 原始有效面积 * 显示尺寸缩放平方
-                const oldDisplayEffectiveArea = oldEffectiveArea * oldDisplayScaleX * oldDisplayScaleY;
-                
-                console.log(`📐 [主体替换] 旧图片显示缩放: X=${oldDisplayScaleX.toFixed(3)}, Y=${oldDisplayScaleY.toFixed(3)}`);
-                console.log(`📐 [主体替换] 旧图片显示有效面积: ${oldDisplayEffectiveArea.toFixed(0)}`);
+        // 计算新图片的有效面积和尺寸
+        const newImg = new Image();
+        newImg.crossOrigin = 'Anonymous';
+        
+        await new Promise<void>((resolve) => {
+          newImg.onload = () => {
+            // 在回调中需要获取旧图层的原始图片尺寸来做正确的比例计算
+            const oldImg = new Image();
+            oldImg.crossOrigin = 'Anonymous';
+            oldImg.onload = () => {
+              calculateEffectiveArea(newImageSrc).then(newEffectiveArea => {
+                console.log(`📐 [主体替换] 新图片有效面积（像素）: ${newEffectiveArea}`);
+                console.log(`📐 [主体替换] 旧图片原始尺寸: ${oldImg.width}x${oldImg.height}, 在画布中显示: ${mainImageLayer.width}x${mainImageLayer.height}`);
+                console.log(`📐 [主体替换] 新图片原始尺寸: ${newImg.width}x${newImg.height}`);
 
-                // 目标：新图片显示出来后，其有效面积也应该等于旧图片的显示有效面积
-                // 新图片显示有效面积 = 新图片原始有效面积 * (新图片显示宽 / 新图片原始宽)^2
-                // 设新图片显示宽为 w，显示高为 h，则：
-                // newEffectiveArea * (w / newImg.width)^2 = oldDisplayEffectiveArea
-                // w / newImg.width = sqrt(oldDisplayEffectiveArea / newEffectiveArea)
-                const scaleFactor = Math.sqrt(oldDisplayEffectiveArea / newEffectiveArea);
-                
-                // 计算新的宽高（保持长宽比）
-                const newWidth = newImg.width * scaleFactor;
-                const newHeight = newImg.height * scaleFactor;
+                // 如果新旧面积都有效，计算缩放比例
+                if (oldEffectiveArea > 0 && newEffectiveArea > 0) {
+                  // 关键：计算"显示尺寸与原始尺寸的比例"
+                  // oldDisplayScale: 旧图片在画布中的实际显示尺寸 / 旧图片的原始像素尺寸
+                  const oldDisplayScaleX = mainImageLayer.width / oldImg.width;
+                  const oldDisplayScaleY = mainImageLayer.height / oldImg.height;
+                  
+                  // 旧图片在画布中的"视觉有效面积" = 原始有效面积 * 显示尺寸缩放平方
+                  const oldDisplayEffectiveArea = oldEffectiveArea * oldDisplayScaleX * oldDisplayScaleY;
+                  
+                  console.log(`📐 [主体替换] 旧图片显示缩放: X=${oldDisplayScaleX.toFixed(3)}, Y=${oldDisplayScaleY.toFixed(3)}`);
+                  console.log(`📐 [主体替换] 旧图片显示有效面积: ${oldDisplayEffectiveArea.toFixed(0)}`);
 
-                console.log(`📐 [主体替换] 缩放因子: ${scaleFactor.toFixed(3)}, 新显示尺寸: ${newWidth.toFixed(0)}x${newHeight.toFixed(0)}`);
+                  // 目标：新图片显示出来后，其有效面积也应该等于旧图片的显示有效面积
+                  // 新图片显示有效面积 = 新图片原始有效面积 * (新图片显示宽 / 新图片原始宽)^2
+                  // 设新图片显示宽为 w，显示高为 h，则：
+                  // newEffectiveArea * (w / newImg.width)^2 = oldDisplayEffectiveArea
+                  // w / newImg.width = sqrt(oldDisplayEffectiveArea / newEffectiveArea)
+                  const scaleFactor = Math.sqrt(oldDisplayEffectiveArea / newEffectiveArea);
+                  
+                  // 计算新的宽高（保持长宽比）
+                  const newWidth = newImg.width * scaleFactor;
+                  const newHeight = newImg.height * scaleFactor;
 
-                // 更新图层：新图片、新尺寸、保持中心位置不变
-                console.log(`🎨 [主体替换] 调用 updateLayer，id=${layerIds.mainImage}, 新 src=${newImageSrc.slice(0, 50)}...`);
-                
-                // 计算尺寸变化（用于调整子图层相对位置）
-                const widthChange = newWidth - mainImageLayer.width;
-                const heightChange = newHeight - mainImageLayer.height;
-                const newMainX = mainImageLayer.x + (mainImageLayer.width - newWidth) / 2;
-                const newMainY = mainImageLayer.y + (mainImageLayer.height - newHeight) / 2;
-                
-                console.log(`📐 [主体替换] 尺寸变化: 宽度 ${widthChange.toFixed(0)}px, 高度 ${heightChange.toFixed(0)}px`);
-                console.log(`📐 [主体替换] 位置变化: X ${mainImageLayer.x} -> ${newMainX.toFixed(0)}, Y ${mainImageLayer.y} -> ${newMainY.toFixed(0)}`);
-                
-                // 更新主体图层
-                updateLayer(layerIds.mainImage, {
-                  src: newImageSrc,
-                  width: newWidth,
-                  height: newHeight,
-                  x: newMainX,
-                  y: newMainY
-                });
+                  console.log(`📐 [主体替换] 缩放因子: ${scaleFactor.toFixed(3)}, 新显示尺寸: ${newWidth.toFixed(0)}x${newHeight.toFixed(0)}`);
 
-                // 找到所有以主体为父图层的子图层，调整它们的位置以保持相对位置关系
-                const childLayers = layers.filter(l => l.parentId === layerIds.mainImage);
-                if (childLayers.length > 0) {
-                  console.log(`🔗 [主体替换] 发现 ${childLayers.length} 个子图层，正在调整相对位置...`);
-                  childLayers.forEach(child => {
-                    // 子图层相对于父图层的偏移量应该保持不变
-                    // 但由于父图层位置改变了，我们需要调整子图层的绝对位置
-                    const childNewX = child.x + (newMainX - mainImageLayer.x);
-                    const childNewY = child.y + (newMainY - mainImageLayer.y);
-                    console.log(`   📍 [主体替换] 调整子图层 ${child.name}: (${child.x}, ${child.y}) -> (${childNewX.toFixed(0)}, ${childNewY.toFixed(0)})`);
-                    updateLayer(child.id, {
-                      x: childNewX,
-                      y: childNewY
-                    });
+                  // 更新图层：新图片、新尺寸、保持中心位置不变
+                  console.log(`🎨 [主体替换] 调用 updateLayer，id=${layerIds.mainImage}, 新 src=${newImageSrc.slice(0, 50)}...`);
+                  
+                  // 计算尺寸变化（用于调整子图层相对位置）
+                  const widthChange = newWidth - mainImageLayer.width;
+                  const heightChange = newHeight - mainImageLayer.height;
+                  const newMainX = mainImageLayer.x + (mainImageLayer.width - newWidth) / 2;
+                  const newMainY = mainImageLayer.y + (mainImageLayer.height - newHeight) / 2;
+                  
+                  console.log(`📐 [主体替换] 尺寸变化: 宽度 ${widthChange.toFixed(0)}px, 高度 ${heightChange.toFixed(0)}px`);
+                  console.log(`📐 [主体替换] 位置变化: X ${mainImageLayer.x} -> ${newMainX.toFixed(0)}, Y ${mainImageLayer.y} -> ${newMainY.toFixed(0)}`);
+                  
+                  // 更新主体图层
+                  updateLayer(layerIds.mainImage, {
+                    src: newImageSrc,
+                    width: newWidth,
+                    height: newHeight,
+                    x: newMainX,
+                    y: newMainY
                   });
+
+                  // 找到所有以主体为父图层的子图层，调整它们的位置以保持相对位置关系
+                  const childLayers = layers.filter(l => l.parentId === layerIds.mainImage);
+                  if (childLayers.length > 0) {
+                    console.log(`🔗 [主体替换] 发现 ${childLayers.length} 个子图层，正在调整相对位置...`);
+                    childLayers.forEach(child => {
+                      // 子图层相对于父图层的偏移量应该保持不变
+                      // 但由于父图层位置改变了，我们需要调整子图层的绝对位置
+                      const childNewX = child.x + (newMainX - mainImageLayer.x);
+                      const childNewY = child.y + (newMainY - mainImageLayer.y);
+                      console.log(`   📍 [主体替换] 调整子图层 ${child.name}: (${child.x}, ${child.y}) -> (${childNewX.toFixed(0)}, ${childNewY.toFixed(0)})`);
+                      updateLayer(child.id, {
+                        x: childNewX,
+                        y: childNewY
+                      });
+                    });
+                  }
+
+                  toast.success('主体已更新');
+                } else {
+                  // 降级处理：如果无法计算有效面积，直接替换但保持尺寸
+                  console.warn('⚠️ [主体替换] 无法获取有效面积数据，执行直接替换');
+                  console.log(`🎨 [主体替换] 调用 updateLayer（降级），id=${layerIds.mainImage}, 新 src=${newImageSrc.slice(0, 50)}...`);
+                  updateLayer(layerIds.mainImage, { src: newImageSrc });
+                  toast.success('主体已更新（未优化尺寸）');
                 }
 
-                toast.success('主体已更新');
-              } else {
-                // 降级处理：如果无法计算有效面积，直接替换但保持尺寸
-                console.warn('⚠️ [主体替换] 无法获取有效面积数据，执行直接替换');
-                console.log(`🎨 [主体替换] 调用 updateLayer（降级），id=${layerIds.mainImage}, 新 src=${newImageSrc.slice(0, 50)}...`);
-                updateLayer(layerIds.mainImage, { src: newImageSrc });
-                toast.success('主体已更新（未优化尺寸）');
-              }
-
+                resolve();
+              });
+            };
+            oldImg.onerror = () => {
+              console.error('❌ [主体替换] 无法加载旧图片获取原始尺寸，执行降级处理');
+              // 降级处理：直接替换，保持画布中的显示尺寸
+              updateLayer(layerIds.mainImage, { src: newImageSrc });
+              toast.success('主体已更新（未优化尺寸）');
               resolve();
-            });
+            };
+            oldImg.src = mainImageLayer.src;
           };
-          oldImg.onerror = () => {
-            console.error('❌ [主体替换] 无法加载旧图片获取原始尺寸，执行降级处理');
-            // 降级处理：直接替换，保持画布中的显示尺寸
-            updateLayer(layerIds.mainImage, { src: newImageSrc });
-            toast.success('主体已更新（未优化尺寸）');
+
+          newImg.onerror = () => {
+            console.error('❌ [主体替换] 新图片加载失败');
+            toast.error('新图片加载失败');
             resolve();
           };
-          oldImg.src = mainImageLayer.src;
-        };
 
-        newImg.onerror = () => {
-          console.error('❌ [主体替换] 新图片加载失败');
-          toast.error('新图片加载失败');
-          resolve();
-        };
-
-        newImg.src = newImageSrc;
-      });
+          newImg.src = newImageSrc;
+        });
+      }
     } catch (e) {
       console.error('❌ [主体替换] 操作失败:', e);
       toast.error('操作失败');
@@ -890,12 +1003,31 @@ export function CanvasProperties({
           <CardTitle className="text-sm font-medium flex items-center gap-2">
             <Wand2 className="h-4 w-4 text-primary" /> 主体内容
           </CardTitle>
+          {/* Agent 提示信息 */}
+          {selectedAgent && (
+            <div className="mt-2 p-2 bg-purple-50 border border-purple-200 rounded-md">
+              <p className="text-xs text-purple-700 font-medium">
+                🤖 已绑定 Agent: <span className="font-bold">{selectedAgent.name}</span>
+              </p>
+              {selectedAgent.name === '会员海报' && (
+                <p className="text-xs text-purple-600 mt-1">
+                  此 Agent 需要上传图片进行生成
+                </p>
+              )}
+            </div>
+          )}
         </CardHeader>
         <CardContent className="space-y-4">
-          <Tabs value={subjectMode} onValueChange={(v: any) => setSubjectMode(v)} className="w-full">
+          <Tabs 
+            value={subjectMode} 
+            onValueChange={(v: any) => setSubjectMode(v)} 
+            className="w-full"
+          >
             <TabsList className="grid w-full grid-cols-2 mb-4">
               <TabsTrigger value="upload">手动上传</TabsTrigger>
-              <TabsTrigger value="generate">AI 生成</TabsTrigger>
+              <TabsTrigger value="generate">
+                {selectedAgent?.name === '会员海报' ? 'AI 生成 (上传图片)' : 'AI 生成'}
+              </TabsTrigger>
             </TabsList>
             
             <TabsContent value="upload" className="space-y-4">
@@ -903,8 +1035,8 @@ export function CanvasProperties({
                 className="border-2 border-dashed rounded-lg p-4 hover:bg-muted/50 transition-colors cursor-pointer text-center relative group"
                 onClick={() => document.getElementById('subject-upload')?.click()}
               >
-                {uploadedSubject ? (
-                  <img src={uploadedSubject} alt="Preview" className="max-h-32 mx-auto object-contain rounded" />
+                {uploadedSubjectManual ? (
+                  <img src={uploadedSubjectManual} alt="Preview" className="max-h-32 mx-auto object-contain rounded" />
                 ) : (
                   <div className="py-4 text-muted-foreground">
                     <Upload className="h-8 w-8 mx-auto mb-2 opacity-50" />
@@ -919,7 +1051,7 @@ export function CanvasProperties({
                   onChange={(e) => {
                     if (e.target.files?.[0]) {
                       const reader = new FileReader();
-                      reader.onload = (ev) => setUploadedSubject(ev.target?.result as string);
+                      reader.onload = (ev) => setUploadedSubjectManual(ev.target?.result as string);
                       reader.readAsDataURL(e.target.files[0]);
                     }
                   }}
@@ -928,15 +1060,50 @@ export function CanvasProperties({
             </TabsContent>
 
             <TabsContent value="generate" className="space-y-4">
-              <div className="space-y-2">
-                <Label className="text-xs">生成描述</Label>
-                <Textarea 
-                  placeholder="例如：一个美味的汉堡，高清摄影..." 
-                  value={subjectPrompt}
-                  onChange={(e) => setSubjectPrompt(e.target.value)}
-                  rows={3}
-                />
-              </div>
+              {selectedAgent?.name === '会员海报' ? (
+                <div className="space-y-2">
+                  <Label className="text-xs">上传图片发送到 Agent</Label>
+                  <div 
+                    className="border-2 border-dashed rounded-lg p-4 hover:bg-muted/50 transition-colors cursor-pointer text-center relative group"
+                    onClick={() => document.getElementById('agent-image-upload')?.click()}
+                  >
+                    {uploadedSubjectAgent ? (
+                      <img src={uploadedSubjectAgent} alt="Preview" className="max-h-32 mx-auto object-contain rounded" />
+                    ) : (
+                      <div className="py-4 text-muted-foreground">
+                        <Upload className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                        <span className="text-xs">点击上传图片</span>
+                      </div>
+                    )}
+                    <input 
+                      id="agent-image-upload" 
+                      type="file" 
+                      className="hidden" 
+                      accept="image/*"
+                      onChange={(e) => {
+                        if (e.target.files?.[0]) {
+                          const reader = new FileReader();
+                          reader.onload = (ev) => setUploadedSubjectAgent(ev.target?.result as string);
+                          reader.readAsDataURL(e.target.files[0]);
+                        }
+                      }}
+                    />
+                  </div>
+                  <p className="text-xs text-purple-600">
+                    此图片将发送到「会员海报」Agent 进行处理
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <Label className="text-xs">生成描述</Label>
+                  <Textarea 
+                    placeholder="例如：一个美味的汉堡，高清摄影..." 
+                    value={subjectPrompt}
+                    onChange={(e) => setSubjectPrompt(e.target.value)}
+                    rows={3}
+                  />
+                </div>
+              )}
             </TabsContent>
           </Tabs>
 
@@ -946,7 +1113,10 @@ export function CanvasProperties({
             disabled={isGenerating}
           >
             {isGenerating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
-            {subjectMode === 'generate' ? '生成并应用' : '应用图片'}
+            {subjectMode === 'generate' 
+              ? (selectedAgent?.name === '会员海报' ? '发送到 Agent 并应用' : '生成并应用')
+              : '应用图片'
+            }
           </Button>
         </CardContent>
       </Card>

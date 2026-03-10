@@ -26,8 +26,12 @@ import {
   Upload
 } from 'lucide-react';
 import { CanvasLayer, CustomTemplate } from '@/lib/canvas-utils';
+import { agentStorage } from '@/lib/agent-storage';
+import { Agent } from '@/lib/types/agent';
 import { v4 as uuidv4 } from 'uuid';
 import html2canvas from 'html2canvas';
+import { Checkbox } from '@/components/ui/checkbox';
+import { toast } from 'sonner';
 
 interface CanvasEditorProps {
   initialData?: CustomTemplate;
@@ -52,6 +56,7 @@ export function CanvasEditor({ initialData, onSave }: CanvasEditorProps) {
   const [layers, setLayers] = useState<CanvasLayer[]>(initialData?.layers || []);
   const [selectedLayerId, setSelectedLayerId] = useState<string | null>(null);
   const [scale, setScale] = useState(0.3);
+  const [agents, setAgents] = useState<Agent[]>([]);
 
   const viewportRef = useRef<HTMLDivElement>(null);
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
@@ -95,6 +100,10 @@ export function CanvasEditor({ initialData, onSave }: CanvasEditorProps) {
     const timer = setTimeout(autoFit, 100);
     return () => clearTimeout(timer);
   }, [initialData]);
+
+  useEffect(() => {
+    setAgents(agentStorage.getAll());
+  }, []);
 
   const selectedLayer = useMemo(() => layers.find(l => l.id === selectedLayerId), [layers, selectedLayerId]);
 
@@ -537,7 +546,16 @@ export function CanvasEditor({ initialData, onSave }: CanvasEditorProps) {
                           useCORS: true,
                           scale: 0.5, // 预览图不需要太高清，0.5倍足够
                           backgroundColor: '#ffffff',
-                          logging: false
+                          logging: false,
+                          onclone: (clonedDoc) => {
+                            // 在克隆的文档中移除可能导致错误的 CSS
+                            const styleTags = clonedDoc.querySelectorAll('style');
+                            styleTags.forEach(style => {
+                              const originalText = style.textContent || '';
+                              // 移除 lab() 颜色函数
+                              style.textContent = originalText.replace(/lab\([^)]*\)/g, '#ffffff');
+                            });
+                          }
                         });
                         
                         const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/png'));
@@ -555,11 +573,13 @@ export function CanvasEditor({ initialData, onSave }: CanvasEditorProps) {
                         }
                       }
                     } catch (e) {
-                      console.error('生成预览图失败', e);
+                      console.warn('生成预览图失败（不影响保存）', e);
+                      // 即使预览图生成失败，也继续保存
                     }
                   }
                   
                   onSave({ name, width, height, layers, layout, previewUrl });
+                  toast.success('模板已保存');
                 }}><Save className="mr-2 h-4 w-4" /> 保存模板</Button>
               </div>
             ) : (
@@ -657,8 +677,53 @@ export function CanvasEditor({ initialData, onSave }: CanvasEditorProps) {
                 )}
 
                 <div className="space-y-2 pt-4 border-t">
-                   <Label className="text-xs text-blue-500 font-bold flex items-center gap-1"><Settings className="h-3 w-3" /> 绑定 AI 标签</Label>
-                   <Input placeholder="例如: 主体, 背景, 装饰" value={selectedLayer.cozeField || ''} onChange={(e) => updateLayer(selectedLayer.id, { cozeField: e.target.value })} className="h-8 border-blue-200 focus:border-blue-500" />
+                   <Label className="text-xs text-blue-500 font-bold flex items-center gap-1"><Settings className="h-3 w-3" /> 绑定 AI 标签 / Agent</Label>
+                   
+                   {selectedLayer.type === 'image' && (
+                     <div className="flex items-center space-x-2 mb-2">
+                       <Checkbox 
+                         id="use-agent" 
+                         checked={selectedLayer.useAgent || false}
+                         onCheckedChange={(checked) => {
+                           updateLayer(selectedLayer.id, { 
+                             useAgent: checked as boolean,
+                             cozeField: checked ? undefined : selectedLayer.cozeField
+                           });
+                         }}
+                       />
+                       <Label htmlFor="use-agent" className="text-xs cursor-pointer">使用 Agent 生成</Label>
+                     </div>
+                   )}
+                   
+                   {selectedLayer.type === 'image' && selectedLayer.useAgent ? (
+                     <div className="space-y-2">
+                       <Label className="text-xs text-purple-500">选择 Agent</Label>
+                       <Select 
+                         value={selectedLayer.selectedAgentId || ''} 
+                         onValueChange={(value) => updateLayer(selectedLayer.id, { selectedAgentId: value })}
+                       >
+                         <SelectTrigger className="h-8 border-purple-200 focus:border-purple-500">
+                           <SelectValue placeholder="选择 Agent" />
+                         </SelectTrigger>
+                         <SelectContent>
+                           {agents.filter(a => a.enabled).map(agent => (
+                             <SelectItem key={agent.id} value={agent.id}>
+                               {agent.name}
+                             </SelectItem>
+                           ))}
+                         </SelectContent>
+                       </Select>
+                       <p className="text-xs text-gray-500">选择 Agent 后，将通过该 Agent 生成此图层内容</p>
+                     </div>
+                   ) : (
+                     <Input 
+                       placeholder="例如: 主体, 背景, 装饰" 
+                       value={selectedLayer.cozeField || ''} 
+                       onChange={(e) => updateLayer(selectedLayer.id, { cozeField: e.target.value })} 
+                       className="h-8 border-blue-200 focus:border-blue-500"
+                       disabled={selectedLayer.type === 'image' && selectedLayer.useAgent}
+                     />
+                   )}
                 </div>
 
                 <div className="space-y-2 pt-4 border-t">

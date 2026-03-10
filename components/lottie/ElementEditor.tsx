@@ -320,7 +320,7 @@ export function ElementEditor({ elements, onUpdate }: ElementEditorProps) {
       
       // 获取当前元素
       const element = elements.find(el => el.id === id);
-      const useAgent = element?.subjectSource === 'agent';
+      const useAgent = element?.useAgentSubject; // 改为检查 useAgentSubject 字段
       const agentId = element?.agentId;
 
       if (subjectMode[id] === 'upload') {
@@ -339,7 +339,7 @@ export function ElementEditor({ elements, onUpdate }: ElementEditorProps) {
           return;
         }
         
-        toast.info(useAgent ? 'Agent 正在生成图片，请稍候...' : 'AI 正在生成图片，请稍候...');
+        toast.info(useAgent ? 'Agent 正在生成图片，请稍候...' : 'API 正在生成图片，请稍候...');
         
         if (useAgent && agentId) {
           // 使用 Agent 生成
@@ -368,7 +368,7 @@ export function ElementEditor({ elements, onUpdate }: ElementEditorProps) {
           
           toast.info('Agent 图片生成中，请耐心等待...');
           
-          // 轮询获取结果 - 使用 coze 接口
+          // 轮询获取结果
           newImageSrc = await pollAIGeneration(chatId, conversationId);
         } else {
           // 使用 API 生成（默认）
@@ -381,23 +381,23 @@ export function ElementEditor({ elements, onUpdate }: ElementEditorProps) {
           const result = await response.json();
           
           if (result.code !== 0) {
-            throw new Error(result.msg || 'AI 生成失败');
+            throw new Error(result.msg || 'API 生成失败');
           }
           
           const { chatId, conversationId } = result.data;
           
           if (!chatId || !conversationId) {
-            throw new Error('AI 生成失败：未获取到会话信息');
+            throw new Error('API 生成失败：未获取到会话信息');
           }
           
-          console.log(`🤖 [handleSubjectApply] AI生成会话已创建，chatId=${chatId}, conversationId=${conversationId}`);
+          console.log(`🤖 [handleSubjectApply] API生成会话已创建，chatId=${chatId}, conversationId=${conversationId}`);
           
-          toast.info('AI图片生成中，请耐心等待...');
+          toast.info('API 图片生成中，请耐心等待...');
           newImageSrc = await pollAIGeneration(chatId, conversationId);
         }
         
-        console.log(`🎯 [handleSubjectApply] AI生成成功，图片URL=${newImageSrc.slice(0, 50)}...`);
-        toast.success(useAgent ? 'Agent 主体生成成功！' : 'AI 主体生成成功！');
+        console.log(`🎯 [handleSubjectApply] 生成成功，图片URL=${newImageSrc.slice(0, 50)}...`);
+        toast.success(useAgent ? 'Agent 主体生成成功！' : 'API 主体生成成功！');
       }
 
       // 应用生成的图片到元素

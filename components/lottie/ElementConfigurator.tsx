@@ -34,10 +34,27 @@ export function ElementConfigurator({ elements, onUpdate }: ElementConfiguratorP
     loadAgents();
   }, []);
   
-  // 判断是否是主体图片字段
-  const isMainImageField = (field: string | undefined) => {
-    return field === 'main_image' || field === 'main_image_2' || field === 'main_image_3';
+  // 处理 Agent 生成状态变更
+  const handleUseAgentChange = (id: string, useAgent: boolean) => {
+    const newElements = elements.map(el => {
+      if (el.id === id) {
+        return { ...JSON.parse(JSON.stringify(el)), useAgentSubject: useAgent, agentId: useAgent ? el.agentId : undefined };
+      }
+      return el;
+    });
+    onUpdate(newElements);
   };
+
+  const handleAgentIdChange = (id: string, agentId: string) => {
+    const newElements = elements.map(el => {
+      if (el.id === id) {
+        return { ...JSON.parse(JSON.stringify(el)), agentId };
+      }
+      return el;
+    });
+    onUpdate(newElements);
+  };
+
   const handleToggle = (id: string, checked: boolean) => {
     const newElements = elements.map(el => {
       if (el.id === id) {
@@ -82,17 +99,6 @@ export function ElementConfigurator({ elements, onUpdate }: ElementConfiguratorP
     const newElements = elements.map(el => {
       if (el.id === id) {
         return { ...JSON.parse(JSON.stringify(el)), groupId };
-      }
-      return el;
-    });
-    onUpdate(newElements);
-  };
-
-  // 处理主体图片来源变更
-  const handleSubjectSourceChange = (id: string, source: string) => {
-    const newElements = elements.map(el => {
-      if (el.id === id) {
-        return { ...JSON.parse(JSON.stringify(el)), subjectSource: source };
       }
       return el;
     });
@@ -231,77 +237,29 @@ export function ElementConfigurator({ elements, onUpdate }: ElementConfiguratorP
                   className="h-8 flex-1"
                 />
                 {el.isEditable && (
-                  <div className="flex gap-2">
-                    <Select 
-                      value={COZE_FIELDS.some(f => f.value === el.cozeField) ? el.cozeField : (el.cozeField ? 'custom' : 'none')} 
-                      onValueChange={(value) => {
-                        if (value === 'custom') {
-                          // 如果选择自定义，先清空或保持原值（如果原值不在列表中）
-                          if (!el.cozeField || COZE_FIELDS.some(f => f.value === el.cozeField)) {
-                            handleCozeFieldChange(el.id, '');
-                          }
-                        } else if (value === 'none') {
-                          handleCozeFieldChange(el.id, '');
-                        } else {
-                          handleCozeFieldChange(el.id, value);
-                        }
-                      }}
-                    >
-                      <SelectTrigger className="h-8 w-[140px]">
-                        <SelectValue placeholder="绑定 Coze 字段" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="none">不绑定</SelectItem>
-                        {COZE_FIELDS.map(field => (
-                          <SelectItem key={field.value} value={field.value}>
-                            {field.label}
-                          </SelectItem>
-                        ))}
-                        <SelectItem value="custom">自定义...</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    
-                    {/* 自定义字段输入框 */}
-                    {(!el.cozeField || !COZE_FIELDS.some(f => f.value === el.cozeField)) && el.cozeField !== undefined && (
-                      <Input 
-                        value={el.cozeField || ''}
-                        onChange={(e) => handleCozeFieldChange(el.id, e.target.value)}
-                        placeholder="输入 Coze 字段名 (如: product_img)"
-                        className="h-8 w-[140px]"
-                      />
+                  <div className="flex gap-2 items-center">
+                    {/* 仅图片元素显示 Agent 生成选项 */}
+                    {el.type === 'image' && (
+                      <>
+                        <Checkbox 
+                          id={`agent-${el.id}`}
+                          checked={el.useAgentSubject || false}
+                          onCheckedChange={(checked) => handleUseAgentChange(el.id, checked as boolean)}
+                          className="h-4 w-4"
+                        />
+                        <Label htmlFor={`agent-${el.id}`} className="text-xs whitespace-nowrap cursor-pointer">
+                          Agent 生成
+                        </Label>
+                      </>
                     )}
                     
-                    {/* 主体图片来源选择 - 仅主体图片字段显示 */}
-                    {isMainImageField(el.cozeField) && (
-                      <Select 
-                        value={el.subjectSource || 'api'}
-                        onValueChange={(value) => handleSubjectSourceChange(el.id, value)}
-                      >
-                        <SelectTrigger className="h-8 w-[140px]">
-                          <SelectValue placeholder="生成来源" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="api">API 生成</SelectItem>
-                          <SelectItem value="agent">Agent 生成</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    )}
-                    
-                    {/* Agent 选择 - 仅当选择 Agent 时显示 */}
-                    {isMainImageField(el.cozeField) && el.subjectSource === 'agent' && (
+                    {/* 使用 Agent 时显示 Agent 选择下拉菜单 */}
+                    {el.type === 'image' && el.useAgentSubject && (
                       <Select 
                         value={el.agentId || ''}
-                        onValueChange={(value) => {
-                          const newElements = elements.map(e => {
-                            if (e.id === el.id) {
-                              return { ...JSON.parse(JSON.stringify(e)), agentId: value };
-                            }
-                            return e;
-                          });
-                          onUpdate(newElements);
-                        }}
+                        onValueChange={(value) => handleAgentIdChange(el.id, value)}
                       >
-                        <SelectTrigger className="h-8 w-[140px]">
+                        <SelectTrigger className="h-8 w-[120px]">
                           <SelectValue placeholder="选择 Agent" />
                         </SelectTrigger>
                         <SelectContent>
@@ -316,6 +274,47 @@ export function ElementConfigurator({ elements, onUpdate }: ElementConfiguratorP
                           )}
                         </SelectContent>
                       </Select>
+                    )}
+                    
+                    {/* 不使用 Agent 时显示标签绑定下拉菜单 */}
+                    {!el.useAgentSubject && (
+                      <Select 
+                        value={COZE_FIELDS.some(f => f.value === el.cozeField) ? el.cozeField : (el.cozeField ? 'custom' : 'none')} 
+                        onValueChange={(value) => {
+                          if (value === 'custom') {
+                            if (!el.cozeField || COZE_FIELDS.some(f => f.value === el.cozeField)) {
+                              handleCozeFieldChange(el.id, '');
+                            }
+                          } else if (value === 'none') {
+                            handleCozeFieldChange(el.id, '');
+                          } else {
+                            handleCozeFieldChange(el.id, value);
+                          }
+                        }}
+                      >
+                        <SelectTrigger className="h-8 w-[140px]">
+                          <SelectValue placeholder="绑定 Coze 字段" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">不绑定</SelectItem>
+                          {COZE_FIELDS.map(field => (
+                            <SelectItem key={field.value} value={field.value}>
+                              {field.label}
+                            </SelectItem>
+                          ))}
+                          <SelectItem value="custom">自定义...</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    )}
+                    
+                    {/* 自定义字段输入框 - 不使用 Agent 时显示 */}
+                    {!el.useAgentSubject && (!el.cozeField || !COZE_FIELDS.some(f => f.value === el.cozeField)) && el.cozeField !== undefined && (
+                      <Input 
+                        value={el.cozeField || ''}
+                        onChange={(e) => handleCozeFieldChange(el.id, e.target.value)}
+                        placeholder="输入 Coze 字段名 (如: product_img)"
+                        className="h-8 w-[140px]"
+                      />
                     )}
                     
                     {/* 分组绑定输入框 */}
