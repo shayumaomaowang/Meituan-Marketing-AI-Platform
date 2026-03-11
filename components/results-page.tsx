@@ -1074,30 +1074,9 @@ export default function ResultsPage() {
         return;
       }
 
-      // 原有逻辑：第一次对话，调用 Coze API
-      updateStatus('正在构思画面并生成素材...')
-      const createResponse = await fetch("/api/coze/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: textToSend, conversationId: activeConversationId }),
-      })
-      const createData = await createResponse.json()
-      const { id: chatId, conversation_id: conversationId } = createData.data
-      setActiveConversationId(conversationId)
-
-      while (true) {
-        const res = await fetch(`/api/coze/status?conversation_id=${conversationId}&chat_id=${chatId}`)
-        const statusData = await res.json()
-        if (statusData.data?.status === "completed") break
-        if (statusData.data?.status === "failed") throw new Error("生成失败")
-        updateStatus('AI 正在全力创作中...')
-        await new Promise(r => setTimeout(r, 2000))
-      }
-
-      updateStatus('素材已就绪，正在进行最后的合成...')
-      const detailsRes = await fetch(`/api/coze/details?conversation_id=${conversationId}&chat_id=${chatId}`)
-      const details = await detailsRes.json()
-      const detailsArray = Array.isArray(details) ? details : details?.data || []
+      // 本地模式：已移除 Coze API 调用
+      updateStatus('使用本地模板和预设素材...')
+      const detailsArray = []
       
        const newMessages: Message[] = []
        for (const item of detailsArray) {

@@ -384,210 +384,27 @@ export class AgentExecutor {
   }
 
   /**
-   * 调用单个 API
+   * 调用单个 API（本地版本 - 已禁用所有外部 API 调用）
    */
   private static async callApi(
     api: APIConfig,
     data: Record<string, any>
   ): Promise<any> {
-    try {
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/json',
-        ...api.headers,
-      }
-
-      // 添加认证信息
-      if (api.authType === 'bearer' && api.authKey) {
-        headers['Authorization'] = `Bearer ${api.authKey}`
-      } else if (api.authType === 'api-key' && api.authKey) {
-        headers['X-API-Key'] = api.authKey
-      }
-
-      // 处理请求体
-      let body = api.body ? JSON.parse(JSON.stringify(api.body)) : {}
-      
-      // 智能处理 LLM API 的 messages 格式
-      if (api.body && Array.isArray(api.body.messages)) {
-        // 这是一个 LLM API，使用 messages 格式
-        const userPrompt = data.prompt || data.input || ''
-        body.messages = [
-          {
-            role: 'system',
-            content: api.body.messages[0]?.content || '你是一个有帮助的助手',
-          },
-          {
-            role: 'user',
-            content: userPrompt,
-          },
-        ]
-        // 移除原有的 prompt 字段
-        delete body.prompt
-      } 
-      // 智能处理图生图 API
-      else if (api.body && api.body.prompt && data.input) {
-        // 这是图生图 API，prompt 用前面的输出
-        body.prompt = data.input
-        
-        // 处理参考图（支持单张或多张）
-        if (data.image || data.referenceImage) {
-          const imageData = data.image || data.referenceImage
-          
-          // 判断是单张还是多张
-          const isArray = Array.isArray(imageData)
-          const images = isArray ? imageData : [imageData]
-          
-          console.log(`🖼️ 处理图片数据: ${images.length} 张`)
-          
-          // 处理每张图片
-          const processedImages: string[] = []
-          for (const img of images) {
-            let processedImg = img
-            
-            // 如果是相对路径（本地上传的素材库图片），转换为 Base64
-            if (img.startsWith('/')) {
-              console.warn(`⚠️ 检测到本地路径: ${img}，调用 Base64 转换 API`)
-              
-              try {
-                // 调用 Base64 转换 API
-                const baseUrl = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000'
-                const base64ApiUrl = `${baseUrl}/api/asset-to-base64?path=${encodeURIComponent(img)}`
-                
-                const response = await fetch(base64ApiUrl)
-                if (response.ok) {
-                  const result = await response.json()
-                  if (result.dataUrl) {
-                    console.log(`✅ 已转换为 Base64，大小: ${(result.size / 1024).toFixed(2)} KB`)
-                    processedImg = result.dataUrl
-                  } else {
-                    throw new Error('API 未返回 dataUrl')
-                  }
-                } else {
-                  throw new Error(`API 返回 ${response.status}`)
-                }
-              } catch (error) {
-                console.error(`❌ Base64 转换失败: ${error}`)
-                // 降级方案：使用 URL（可能会超时）
-                let publicUrl = ''
-                if (process.env.NEXT_PUBLIC_ASSET_CDN) {
-                  publicUrl = `${process.env.NEXT_PUBLIC_ASSET_CDN}${img}`
-                  console.log(`🔄 降级为 URL 方案，使用 CDN: ${publicUrl}`)
-                } else if (process.env.NEXT_PUBLIC_API_URL) {
-                  publicUrl = `${process.env.NEXT_PUBLIC_API_URL}${img}`
-                  console.log(`🔄 降级为 URL 方案，使用公网 URL: ${publicUrl}`)
-                }
-                if (publicUrl) {
-                  processedImg = publicUrl
-                }
-              }
-            } else if (img.startsWith('data:') || img.startsWith('http')) {
-              // 已经是 Base64 或网络 URL，直接使用
-              console.log(`🖼️ 使用原有的参考图格式`)
-              processedImg = img
-            }
-            
-            processedImages.push(processedImg)
-          }
-          
-          // 设置到 body 中
-          if (isArray) {
-            body.image = processedImages
-            console.log(`🖼️ 为图生图 API 设置 ${processedImages.length} 张参考图（数组格式）`)
-          } else {
-            body.image = processedImages[0]
-            console.log(`🖼️ 为图生图 API 设置参考图`)
-          }
-        }
-      } else {
-        // 这是其他类型的 API，直接合并数据
-        body = { ...body, ...data }
-      }
-
-      console.log(`🔄 调用 API: ${api.name}`)
-      console.log(`📤 请求体详情:`, JSON.stringify(body, null, 2))
-
-      const response = await fetch(api.endpoint, {
-        method: api.method,
-        headers,
-        body: JSON.stringify(body),
-      })
-
-      if (!response.ok) {
-        const errorText = await response.text()
-        console.error(`❌ API 调用失败: ${api.name} (${response.status})`)
-        console.error(`❌ 错误响应: ${errorText}`)
-        return null
-      }
-
-      const result = await response.json()
-      
-      // 如果是 LLM 的 chat completions 响应，提取消息内容
-      if (result.choices && result.choices[0]?.message?.content) {
-        console.log(`✅ LLM 响应:`, result.choices[0].message.content)
-        return result.choices[0].message.content
-      }
-
-      // 如果是图生 API 的响应，提取 URL 或结果
-      if (result.data) {
-        console.log(`✅ 图生 API 响应:`, result.data)
-        // 如果 data 是数组，返回第一个；如果是对象，直接返回
-        if (Array.isArray(result.data) && result.data.length > 0) {
-          const firstItem = result.data[0]
-          if (typeof firstItem === 'object' && firstItem.url) {
-            return firstItem.url
-          }
-          return firstItem
-        }
-        return result.data
-      }
-      
-      console.log(`✅ API 响应:`, result)
-      return result
-    } catch (error) {
-      console.error(`❌ API 调用错误: ${api.name}`, error)
-      return null
+    console.warn(`⚠️ 本地版本 - 不支持外部 API 调用: ${api.name} (${api.endpoint})`)
+    return {
+      error: '本地版本不支持外部 API 调用',
+      message: '该应用已配置为完全本地运行模式'
     }
   }
 }
 
 /**
- * 测试单个 API
+ * 测试单个 API（本地版本 - 已禁用）
  */
 export async function testAPI(apiId: string, testData?: Record<string, any>): Promise<any> {
-  const api = apiStorage.getById(apiId)
-  if (!api) {
-    return { error: 'API not found' }
-  }
-
-  try {
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      ...api.headers,
-    }
-
-    if (api.authType === 'bearer' && api.authKey) {
-      headers['Authorization'] = `Bearer ${api.authKey}`
-    } else if (api.authType === 'api-key' && api.authKey) {
-      headers['X-API-Key'] = api.authKey
-    }
-
-    const body = { ...api.body, ...testData }
-
-    const response = await fetch(api.endpoint, {
-      method: api.method,
-      headers,
-      body: JSON.stringify(body),
-    })
-
-    const result = await response.json()
-    return {
-      status: response.status,
-      success: response.ok,
-      data: result,
-    }
-  } catch (error) {
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : 'Unknown error',
-    }
+  console.warn('⚠️ 本地版本 - API 测试功能已禁用')
+  return {
+    success: false,
+    error: '本地版本不支持 API 测试'
   }
 }
