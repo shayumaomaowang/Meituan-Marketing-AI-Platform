@@ -77,13 +77,8 @@ const calculateEffectiveArea = (imageSrc: string): Promise<number> => {
       };
 
       img.onerror = () => {
-        if (!isRetry && src.startsWith('http')) {
-          console.log('❌ [图片分析] 直连加载失败，自动切换代理重试...');
-          tryLoad(`/api/proxy-image?url=${encodeURIComponent(imageSrc)}`, true);
-        } else {
-          console.error('❌ [图片分析] 图片完全无法加载');
-          resolve(0);
-        }
+        console.error('❌ [图片分析] 图片加载失败');
+        resolve(0);
       };
 
       img.src = src;
@@ -364,62 +359,10 @@ export function CanvasProperties({
 
   // --- 3. 处理逻辑 ---
 
-  // 轮询AI生成状态的函数
-  const pollAIGeneration = async (chatId: string, conversationId: string): Promise<string> => {
-    console.log(`🔄 [pollAIGeneration] 开始轮询，chatId=${chatId}, conversationId=${conversationId}`);
-    
-    const maxAttempts = 30; // 最多尝试30次
-    const delayMs = 2000; // 每次间隔2秒
-    
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      console.log(`⏳ [pollAIGeneration] 第 ${attempt}/${maxAttempts} 次尝试`);
-      
-      // 1. 检查状态
-      const statusResponse = await fetch(`/api/coze-canvas/status?conversation_id=${conversationId}&chat_id=${chatId}`);
-      const statusResult = await statusResponse.json();
-      
-      if (statusResult.code !== 0) {
-        console.error(`❌ [pollAIGeneration] 状态检查失败: ${statusResult.msg}`);
-        await new Promise(resolve => setTimeout(resolve, delayMs));
-        continue;
-      }
-      
-      const status = statusResult.data?.status;
-      console.log(`📊 [pollAIGeneration] 当前状态: ${status}`);
-      
-      if (status === 'completed' || status === 'succeeded') {
-        // 2. 状态完成，获取详情
-        console.log(`✅ [pollAIGeneration] AI生成完成，获取详情...`);
-        const detailsResponse = await fetch(`/api/coze-canvas/details?conversation_id=${conversationId}&chat_id=${chatId}`);
-        const detailsResult = await detailsResponse.json();
-        
-        if (detailsResult.code === 0 && detailsResult.data?.imageUrl) {
-          console.log(`🎉 [pollAIGeneration] 成功获取图片URL: ${detailsResult.data.imageUrl.slice(0, 50)}...`);
-          return detailsResult.data.imageUrl;
-        } else {
-          console.warn(`⚠️ [pollAIGeneration] 未找到图片URL，详情:`, detailsResult);
-          
-          // 如果已经完成但没找到图片，再尝试几次
-          if (attempt > 20) {
-            console.log(`🔄 [pollAIGeneration] AI已完成但未返回图片，尝试使用主题相关的占位图`);
-            // 根据提示词返回相关的占位图
-            return getFallbackImage(subjectPrompt);
-          }
-        }
-      } else if (status === 'failed' || status === 'error') {
-        throw new Error(`AI生成失败，状态: ${status}`);
-      }
-      
-      // 显示进度提示
-      if (attempt % 5 === 0) {
-        toast.info(`AI生成中... 已等待 ${attempt * 2} 秒`);
-      }
-      
-      await new Promise(resolve => setTimeout(resolve, delayMs));
-    }
-    
-    console.log(`⏰ [pollAIGeneration] 轮询超时，使用主题相关的占位图`);
-    return getFallbackImage(subjectPrompt);
+  // 本地占位图函数（已移除外部 AI 生成调用）
+  const getLocalFallbackImage = (prompt: string): string => {
+    // 直接返回本地占位图，不再调用外部 API
+    return getFallbackImage(prompt);
   };
   
   // 获取后备图片的函数
@@ -516,52 +459,21 @@ export function CanvasProperties({
           return;
         }
         
-        // 如果是外部 URL（非 data URL），使用代理避免 CORS 问题
-        if (agentImageSrc.startsWith('http://') || agentImageSrc.startsWith('https://')) {
-          console.log(`🔗 [handleSubjectApply] 检测到外部图片URL，使用代理: ${agentImageSrc.slice(0, 80)}...`);
-          newImageSrc = `/api/proxy-image?url=${encodeURIComponent(agentImageSrc)}`;
-        } else {
-          newImageSrc = agentImageSrc;
-        }
+        // 直接使用图片URL（不使用外部代理）
+        newImageSrc = agentImageSrc;
         console.log(`🤖 [handleSubjectApply] Agent 处理完成，新图片=${newImageSrc.slice(0, 50)}...`);
         toast.success(`「${selectedAgent.name}」Agent 处理完成！`);
       } else {
-        // 真实的 AI 生成 - 调用 Coze Canvas API
+        // 本地模式 - 使用占位图（已移除外部 AI 生成调用）
         if (!subjectPrompt) {
           toast.error('请输入生成文案');
           setIsGenerating(false);
           return;
         }
         
-        toast.info('AI 正在生成图片，请稍候...');
-        
-        // 1. 发起AI生成请求
-        const response = await fetch('/api/coze-canvas/chat', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ prompt: subjectPrompt })
-        });
-        
-        const result = await response.json();
-        
-        if (result.code !== 0) {
-          throw new Error(result.msg || 'AI 生成失败');
-        }
-        
-        const { chatId, conversationId } = result.data;
-        
-        if (!chatId || !conversationId) {
-          throw new Error('AI 生成失败：未获取到会话信息');
-        }
-        
-        console.log(`🤖 [handleSubjectApply] AI生成会话已创建，chatId=${chatId}, conversationId=${conversationId}`);
-        
-        // 2. 轮询获取生成的图片
-        toast.info('AI图片生成中，请耐心等待...');
-        newImageSrc = await pollAIGeneration(chatId, conversationId);
-        
-        console.log(`🎯 [handleSubjectApply] AI生成成功，图片URL=${newImageSrc.slice(0, 50)}...`);
-        toast.success('AI 主体生成成功！');
+        toast.info('使用本地图片库中的占位图...');
+        newImageSrc = getLocalFallbackImage(subjectPrompt);
+        toast.success('已加载本地图片！');
       }
 
       // 获取旧图层信息
